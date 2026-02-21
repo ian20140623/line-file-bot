@@ -72,6 +72,11 @@ def is_document(filename):
     return ext in DOCUMENT_EXTENSIONS
 
 
+@app.route("/")
+def health_check():
+    return "OK"
+
+
 @app.route("/callback", methods=["POST"])
 def callback():
     signature = request.headers.get("X-Line-Signature", "")
