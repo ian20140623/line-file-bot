@@ -2,7 +2,7 @@
 *last updated: 2026-02-24*
 
 > **給未來 AI 的說明**
-> 請先閱讀共用指引：[`../AI_LOG_INSTRUCTIONS.md`](../AI_LOG_INSTRUCTIONS.md)
+> 共用指引見 [`../shared/LOG_GUIDE.md`](../shared/LOG_GUIDE.md)
 >
 > **本專案補充：**
 > - 遠端：origin/main
