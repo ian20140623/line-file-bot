@@ -117,7 +117,7 @@ line-file-bot/
 ├── .env.example           # 環境變數範本
 ├── .python-version        # Python 版本（3.12.6）
 ├── log_chronological.md   # 開發記錄 — 流水帳
-└── log_functional.md      # 開發記錄 — 功能說明
+└── system_map.md          # 現況快照 — 功能說明
 ```
 
 ---
