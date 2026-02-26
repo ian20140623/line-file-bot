@@ -1,7 +1,7 @@
 # CLAUDE.md — line-file-bot
 
 > 專案資訊見 README.md、system_map.md
-> 共用指引見 ../shared/LOG_GUIDE.md
+> 共用指引與環境規則見 ../shared/CLAUDE.md、../shared/LOG_GUIDE.md
 
 ## 部署
 - push 到 GitHub → Render 自動部署
