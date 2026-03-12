@@ -35,11 +35,11 @@ from linebot.v3.webhooks import (
     AudioMessageContent,
 )
 from linebot.v3.messaging.api import MessagingApiBlob
-from openai import OpenAI
+import anthropic
 
 CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 DOWNLOAD_DIR = os.environ.get("DOWNLOAD_DIR", "./downloaded_files")
 
 DOCUMENT_EXTENSIONS = {
@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
-openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 Path(DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
 
 # --- In-memory session store ---
@@ -132,19 +132,28 @@ def reply_message(event, messages):
         )
 
 
-# --- GPT-4o functions ---
+# --- Claude API functions ---
 
 
 def ocr_image(image_b64):
     """OCR：提取圖片中的文字，回傳純文字結果。"""
-    if not openai_client:
-        return None, "OPENAI_API_KEY 未設定，無法分析圖片。"
-    response = openai_client.chat.completions.create(
-        model="gpt-4o",
+    if not claude_client:
+        return None, "ANTHROPIC_API_KEY 未設定，無法分析圖片。"
+    response = claude_client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=2000,
         messages=[
             {
                 "role": "user",
                 "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": image_b64,
+                        },
+                    },
                     {
                         "type": "text",
                         "text": (
@@ -153,41 +162,33 @@ def ocr_image(image_b64):
                             "只回傳提取結果，不要加任何說明或前綴。"
                         ),
                     },
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
-                    },
                 ],
             }
         ],
-        max_tokens=2000,
     )
-    return response.choices[0].message.content, None
+    return response.content[0].text, None
 
 
 def proofread_text(text):
     """報告審稿：校對錯字、標點、空白。"""
-    if not openai_client:
-        return "OPENAI_API_KEY 未設定。"
-    response = openai_client.chat.completions.create(
-        model="gpt-4o",
+    if not claude_client:
+        return "ANTHROPIC_API_KEY 未設定。"
+    response = claude_client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=2000,
+        system=(
+            "你是繁體中文校對專家。請針對以下文字進行：\n"
+            "1. 錯字修正\n"
+            "2. 標點符號修正\n"
+            "3. 異常空白標記\n"
+            "用「原文 → 修正」格式列出所有問題。"
+            "如果沒有問題，回覆「未發現錯誤」。"
+        ),
         messages=[
-            {
-                "role": "system",
-                "content": (
-                    "你是繁體中文校對專家。請針對以下文字進行：\n"
-                    "1. 錯字修正\n"
-                    "2. 標點符號修正\n"
-                    "3. 異常空白標記\n"
-                    "用「原文 → 修正」格式列出所有問題。"
-                    "如果沒有問題，回覆「未發現錯誤」。"
-                ),
-            },
             {"role": "user", "content": text},
         ],
-        max_tokens=2000,
     )
-    return response.choices[0].message.content
+    return response.content[0].text
 
 
 # --- Route handlers ---
