@@ -1,7 +1,8 @@
 """
-LINE Bot - 自動下載文件檔案 + 圖片 AI 分流處理
+LINE Bot - 自動下載文件檔案 + 圖片 AI 分流處理 + 文字對話
 - 文件：自動下載儲存
 - 圖片：OCR 預覽 → Quick Reply 選模式（報告審稿 / 文字提取）
+- 文字：Claude 對話（帶記憶，最近 10 輪，30 分鐘 TTL）
 """
 
 import os
@@ -31,6 +32,7 @@ from linebot.v3.webhooks import (
     PostbackEvent,
     FileMessageContent,
     ImageMessageContent,
+    TextMessageContent,
     VideoMessageContent,
     AudioMessageContent,
 )
@@ -49,6 +51,8 @@ DOCUMENT_EXTENSIONS = {
 }
 
 SESSION_TTL = 600  # 10 分鐘
+CHAT_TTL = 1800  # 30 分鐘
+CHAT_MAX_TURNS = 10  # 最多記住 10 輪對話
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -90,6 +94,34 @@ def _session_cleanup():
         expired = [k for k, v in _sessions.items() if now - v["timestamp"] >= SESSION_TTL]
         for k in expired:
             del _sessions[k]
+
+
+# --- Chat history store ---
+# key: user_id, value: {"messages": [{"role": str, "content": str}, ...], "timestamp": float}
+_chat_history = {}
+_chat_lock = threading.Lock()
+
+
+def chat_history_append(user_id, role, content):
+    now = time.time()
+    with _chat_lock:
+        if user_id not in _chat_history or (now - _chat_history[user_id]["timestamp"]) >= CHAT_TTL:
+            _chat_history[user_id] = {"messages": [], "timestamp": now}
+        history = _chat_history[user_id]
+        history["messages"].append({"role": role, "content": content})
+        # 保留最近 N 輪（每輪 = user + assistant = 2 筆）
+        if len(history["messages"]) > CHAT_MAX_TURNS * 2:
+            history["messages"] = history["messages"][-(CHAT_MAX_TURNS * 2):]
+        history["timestamp"] = now
+
+
+def chat_history_get(user_id):
+    with _chat_lock:
+        data = _chat_history.get(user_id)
+        if data and (time.time() - data["timestamp"]) < CHAT_TTL:
+            return data["messages"]
+        _chat_history.pop(user_id, None)
+        return []
 
 
 # --- Utility functions ---
@@ -167,6 +199,23 @@ def ocr_image(image_b64):
         ],
     )
     return response.content[0].text, None
+
+
+def chat_with_claude(user_id, user_message):
+    """文字對話：帶記憶的 Claude 對話。"""
+    if not claude_client:
+        return "ANTHROPIC_API_KEY 未設定。"
+    chat_history_append(user_id, "user", user_message)
+    messages = chat_history_get(user_id)
+    response = claude_client.messages.create(
+        model="claude-opus-4-20250514",
+        max_tokens=1000,
+        system="你是一個友善的繁體中文助手。回覆請簡潔扼要。",
+        messages=messages,
+    )
+    reply = response.content[0].text
+    chat_history_append(user_id, "assistant", reply)
+    return reply
 
 
 def proofread_text(text):
@@ -334,6 +383,21 @@ def handle_postback(event):
 
     else:
         reply_message(event, [TextMessage(text="未知操作，請重新傳送圖片。")])
+
+
+@handler.add(MessageEvent, message=TextMessageContent)
+def handle_text_message(event):
+    user_id = event.source.user_id
+    user_text = event.message.text
+    logger.info(f"Received text: user={user_id}, text={user_text[:50]}")
+    try:
+        reply = chat_with_claude(user_id, user_text)
+        if len(reply) > 5000:
+            reply = reply[:4997] + "..."
+        reply_message(event, [TextMessage(text=reply)])
+    except Exception as e:
+        logger.error(f"Chat failed: {e}")
+        reply_message(event, [TextMessage(text=f"回覆失敗：{str(e)}")])
 
 
 @handler.add(MessageEvent)

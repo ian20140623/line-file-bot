@@ -87,6 +87,34 @@
 
 ---
 
+## 2026-03-12：OpenAI → Anthropic 遷移 [NB]
+
+### 變更
+- `requirements.txt`：`openai>=1.0.0` → `anthropic>=0.40.0`
+- `app.py`：OpenAI SDK → Anthropic SDK
+- `ocr_image()`、`proofread_text()` 改用 Claude Sonnet 4
+- 環境變數：`OPENAI_API_KEY` → `ANTHROPIC_API_KEY`
+
+### 原因
+- 用戶設定 OpenAI API Key 時遇到困難，改用 Anthropic
+
+---
+
+## 2026-03-12：文字對話功能 [NB]
+
+### 新增
+- `TextMessageContent` handler：接收文字訊息，送 Claude 對話
+- `chat_with_claude()`：帶記憶的對話函數
+- Chat history store（`_chat_history` dict）：每用戶最近 10 輪，30 分鐘 TTL
+- 對話模型：Claude Opus 4.6
+- System prompt：繁體中文助手，簡潔扼要
+
+### 架構決策
+- 對話用 Opus 4.6（最強），OCR/審稿用 Sonnet 4（準確+快）
+- Chat history 與 image session 分開存放，互不干擾
+
+---
+
 ## 待解決
 
 - **Render 免費方案限制** — 15 分鐘無流量會休眠，喚醒需約 30 秒

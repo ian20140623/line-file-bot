@@ -1,5 +1,5 @@
 # LINE File Bot 開發記錄 — 功能說明
-*last updated: 2026-02-24*
+*last updated: 2026-03-12*
 
 > **給未來 AI 的說明**
 > 共用指引見 [`../shared/LOG_GUIDE.md`](../shared/LOG_GUIDE.md)
@@ -11,12 +11,13 @@
 
 ## 系統目標
 - 自動接收 LINE 群組或私訊中分享的文件檔案，下載並儲存到本地，回傳確認訊息。
-- 接收圖片訊息，送 GPT-4o 多模態模型分析，將理解結果回傳 LINE 對話。
+- 接收圖片訊息，Claude Sonnet OCR 提取文字，支援審稿/提取分流。
+- 文字對話：Claude Haiku 帶記憶對話（最近 10 輪，30 分鐘 TTL）。
 
 ---
 
 ## 技術架構
-*last updated: 2026-02-24*
+*last updated: 2026-03-12*
 
 | 元件 | 角色 |
 |------|------|
@@ -24,7 +25,7 @@
 | Flask 3.1.0 | Web 框架（HTTP 端點） |
 | Gunicorn 23.0.0 | Production WSGI Server |
 | line-bot-sdk 3.22.0 | LINE Messaging API SDK |
-| openai (Python SDK) | GPT-4o 多模態圖片分析 |
+| anthropic (Python SDK) | Claude Sonnet 4（OCR/審稿）、Opus 4.6（對話） |
 | Render | 部署平台（免費方案） |
 
 ---
@@ -49,14 +50,19 @@
 - 儲存到 `DOWNLOAD_DIR`（預設 `./downloaded_files`）
 
 ### 4. 圖片分流 (`handle_image_message` → `handle_postback`)
-- 收到圖片 → 下載 → GPT-4o OCR 提取文字
+- 收到圖片 → 下載 → Claude Sonnet OCR 提取文字
 - 回覆文字預覽（前 200 字）+ Quick Reply 按鈕
 - 用戶選擇：
   - **文字提取**：回傳 OCR 全文
-  - **報告審稿**：GPT-4o 校對（錯字、標點、異常空白）
+  - **報告審稿**：Claude Sonnet 校對（錯字、標點、異常空白）
 - In-memory session 暫存 OCR 結果（TTL 10 分鐘）
 
-### 5. 健康檢查 (`/`)
+### 5. 文字對話 (`handle_text_message`)
+- 收到文字訊息 → 帶歷史記錄送 Claude Opus 4.6
+- 每用戶最近 10 輪對話記憶，30 分鐘 TTL
+- Chat history 與 image session 分開存放
+
+### 6. 健康檢查 (`/`)
 - GET 請求回傳 "OK"
 - 供 uptime monitoring 服務定期 ping，維持 Render 免費方案不休眠
 
@@ -93,14 +99,14 @@
 ---
 
 ## 環境變數
-*last updated: 2026-02-24*
+*last updated: 2026-03-12*
 
 | 變數 | 說明 |
 |------|------|
 | `LINE_CHANNEL_ACCESS_TOKEN` | Bot 認證 Token |
 | `LINE_CHANNEL_SECRET` | Webhook 簽名驗證 |
 | `DOWNLOAD_DIR` | 檔案儲存目錄（預設 `./downloaded_files`） |
-| `OPENAI_API_KEY` | OpenAI API Key（GPT-4o 圖片分析） |
+| `ANTHROPIC_API_KEY` | Anthropic API Key（Claude OCR/審稿/對話） |
 | `PORT` | 伺服器埠號（預設 5000） |
 
 ---
@@ -113,7 +119,7 @@
 | Render 免費方案休眠 | 15 分鐘無流量自動休眠，喚醒需約 30 秒 | Health check endpoint + 外部 uptime monitoring |
 | 暫存性儲存 | Render 重啟後檔案消失 | 未來可改接雲端儲存（Google Drive、S3） |
 | LINE 檔案過期 | LINE 伺服器上的檔案有時效限制 | Webhook 即時下載，不做延遲處理 |
-| 僅支援文件+圖片 | 影片、音訊不處理 | 設計選擇：文件下載 + 圖片 AI 分析 |
+| 僅支援文件+圖片+文字 | 影片、音訊不處理 | 設計選擇：文件下載 + 圖片 AI 分析 + 文字對話 |
 
 ---
 
@@ -148,7 +154,9 @@ line-file-bot/
 - [x] 基本檔案下載功能
 - [x] Python 3.12 相容性修復（line-bot-sdk 升級）
 - [x] Health check endpoint
-- [x] 圖片接收 + GPT-4o 多模態分析
-- [ ] 圖片/PDF 分流處理（Quick Reply 選單）
+- [x] 圖片接收 + 多模態分析
+- [x] 圖片分流處理（OCR + Quick Reply 選單）
+- [x] OpenAI → Anthropic 遷移
+- [x] 文字對話功能（Claude Opus 4.6 + 記憶）
 - [ ] 接入持久化儲存（Google Drive / S3）
 - [ ] 加入錯誤通知機制
