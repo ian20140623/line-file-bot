@@ -48,12 +48,13 @@
 - 檔名清理特殊字元 + 加時間戳（`name_YYYYmmdd_HHMMSS.ext`）
 - 儲存到 `DOWNLOAD_DIR`（預設 `./downloaded_files`）
 
-### 4. 圖片處理 (`handle_image_message`)
-- 收到圖片訊息時觸發
-- 用 `MessagingApiBlob.get_message_content()` 下載圖片
-- 圖片 base64 編碼後送 GPT-4o (`analyze_image_with_gpt4o`)
-- Prompt：繁體中文描述圖片內容 + 擷取文字
-- 回傳分析結果到 LINE 對話
+### 4. 圖片分流 (`handle_image_message` → `handle_postback`)
+- 收到圖片 → 下載 → GPT-4o OCR 提取文字
+- 回覆文字預覽（前 200 字）+ Quick Reply 按鈕
+- 用戶選擇：
+  - **文字提取**：回傳 OCR 全文
+  - **報告審稿**：GPT-4o 校對（錯字、標點、異常空白）
+- In-memory session 暫存 OCR 結果（TTL 10 分鐘）
 
 ### 5. 健康檢查 (`/`)
 - GET 請求回傳 "OK"

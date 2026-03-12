@@ -67,6 +67,26 @@
 
 ---
 
+## 2026-03-12：B1 圖片分流 — OCR + Quick Reply + Postback [NB]
+
+### 新增
+- `ocr_image()`：GPT-4o OCR 專用函數，提取圖片文字
+- `proofread_text()`：GPT-4o 校對函數（錯字、標點、空白）
+- `handle_postback()`：PostbackEvent handler，處理 Quick Reply 選擇
+- In-memory session store（`_sessions` dict + TTL 10 分鐘 + threading lock）
+- `reply_message()` 共用 helper，減少重複程式碼
+
+### 變更
+- `handle_image_message` 改為分流模式：OCR → 預覽 → Quick Reply
+- 移除 `analyze_image_with_gpt4o()`（被 `ocr_image` 取代）
+
+### 架構決策
+- In-memory dict 暫存 OCR 結果 — Render 單 worker 夠用，重啟歸零可接受
+- PostbackAction 而非 MessageAction — postback data 不會顯示在對話中，較乾淨
+- OCR prompt 改為純文字提取（不做圖片描述），審稿/提取在 postback 階段才分流
+
+---
+
 ## 待解決
 
 - **Render 免費方案限制** — 15 分鐘無流量會休眠，喚醒需約 30 秒

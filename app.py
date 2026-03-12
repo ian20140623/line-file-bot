@@ -1,13 +1,16 @@
 """
-LINE Bot - 自動下載文件檔案 + 圖片 AI 理解
+LINE Bot - 自動下載文件檔案 + 圖片 AI 分流處理
 - 文件：自動下載儲存
-- 圖片：送 GPT-4o 多模態理解，回傳分析結果
+- 圖片：OCR 預覽 → Quick Reply 選模式（報告審稿 / 文字提取）
 """
 
 import os
 import re
+import json
 import base64
 import logging
+import time
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -19,9 +22,13 @@ from linebot.v3.messaging import (
     MessagingApi,
     ReplyMessageRequest,
     TextMessage,
+    QuickReply,
+    QuickReplyItem,
+    PostbackAction,
 )
 from linebot.v3.webhooks import (
     MessageEvent,
+    PostbackEvent,
     FileMessageContent,
     ImageMessageContent,
     VideoMessageContent,
@@ -41,6 +48,8 @@ DOCUMENT_EXTENSIONS = {
     ".zip", ".rar", ".7z",
 }
 
+SESSION_TTL = 600  # 10 分鐘
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -49,6 +58,41 @@ configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 Path(DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
+
+# --- In-memory session store ---
+# key: user_id, value: {"ocr_text": str, "image_b64": str, "timestamp": float}
+_sessions = {}
+_sessions_lock = threading.Lock()
+
+
+def session_set(user_id, ocr_text, image_b64):
+    with _sessions_lock:
+        _sessions[user_id] = {
+            "ocr_text": ocr_text,
+            "image_b64": image_b64,
+            "timestamp": time.time(),
+        }
+    _session_cleanup()
+
+
+def session_get(user_id):
+    with _sessions_lock:
+        data = _sessions.get(user_id)
+        if data and (time.time() - data["timestamp"]) < SESSION_TTL:
+            return data
+        _sessions.pop(user_id, None)
+        return None
+
+
+def _session_cleanup():
+    now = time.time()
+    with _sessions_lock:
+        expired = [k for k, v in _sessions.items() if now - v["timestamp"] >= SESSION_TTL]
+        for k in expired:
+            del _sessions[k]
+
+
+# --- Utility functions ---
 
 
 def get_safe_filename(filename):
@@ -77,6 +121,78 @@ def is_document(filename):
     return ext in DOCUMENT_EXTENSIONS
 
 
+def reply_message(event, messages):
+    with ApiClient(configuration) as api_client:
+        messaging_api = MessagingApi(api_client)
+        messaging_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=messages,
+            )
+        )
+
+
+# --- GPT-4o functions ---
+
+
+def ocr_image(image_b64):
+    """OCR：提取圖片中的文字，回傳純文字結果。"""
+    if not openai_client:
+        return None, "OPENAI_API_KEY 未設定，無法分析圖片。"
+    response = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "請提取這張圖片中的所有文字。"
+                            "如果圖片沒有文字，請簡短描述圖片內容（一句話）。"
+                            "只回傳提取結果，不要加任何說明或前綴。"
+                        ),
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+                    },
+                ],
+            }
+        ],
+        max_tokens=2000,
+    )
+    return response.choices[0].message.content, None
+
+
+def proofread_text(text):
+    """報告審稿：校對錯字、標點、空白。"""
+    if not openai_client:
+        return "OPENAI_API_KEY 未設定。"
+    response = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "你是繁體中文校對專家。請針對以下文字進行：\n"
+                    "1. 錯字修正\n"
+                    "2. 標點符號修正\n"
+                    "3. 異常空白標記\n"
+                    "用「原文 → 修正」格式列出所有問題。"
+                    "如果沒有問題，回覆「未發現錯誤」。"
+                ),
+            },
+            {"role": "user", "content": text},
+        ],
+        max_tokens=2000,
+    )
+    return response.choices[0].message.content
+
+
+# --- Route handlers ---
+
+
 @app.route("/")
 def health_check():
     return "OK"
@@ -95,6 +211,9 @@ def callback():
     return "OK"
 
 
+# --- Message handlers ---
+
+
 @handler.add(MessageEvent, message=FileMessageContent)
 def handle_file_message(event):
     message = event.message
@@ -111,65 +230,109 @@ def handle_file_message(event):
     else:
         ext = os.path.splitext(filename)[1]
         reply_text = f"Received {filename}, but {ext} is not in the auto-download list."
-    with ApiClient(configuration) as api_client:
-        messaging_api = MessagingApi(api_client)
-        messaging_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=reply_text)],
-            )
-        )
-
-
-def analyze_image_with_gpt4o(image_bytes):
-    if not openai_client:
-        return "⚠️ OPENAI_API_KEY 未設定，無法分析圖片。"
-    b64_image = base64.b64encode(image_bytes).decode("utf-8")
-    response = openai_client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "請用繁體中文描述這張圖片的內容。如果圖片中有文字，請一併擷取出來。",
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{b64_image}",
-                        },
-                    },
-                ],
-            }
-        ],
-        max_tokens=1000,
-    )
-    return response.choices[0].message.content
+    reply_message(event, [TextMessage(text=reply_text)])
 
 
 @handler.add(MessageEvent, message=ImageMessageContent)
 def handle_image_message(event):
     message_id = event.message.id
-    logger.info(f"Received image: message_id={message_id}")
+    user_id = event.source.user_id
+    logger.info(f"Received image: message_id={message_id}, user={user_id}")
+
     try:
+        # 下載圖片
         with ApiClient(configuration) as api_client:
             blob_api = MessagingApiBlob(api_client)
             image_bytes = blob_api.get_message_content(message_id)
         logger.info(f"Image downloaded: {len(image_bytes)} bytes")
-        reply_text = analyze_image_with_gpt4o(image_bytes)
-    except Exception as e:
-        logger.error(f"Image analysis failed: {e}")
-        reply_text = f"圖片分析失敗：{str(e)}"
-    with ApiClient(configuration) as api_client:
-        messaging_api = MessagingApi(api_client)
-        messaging_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=reply_text)],
+
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        # OCR
+        ocr_text, error = ocr_image(image_b64)
+        if error:
+            reply_message(event, [TextMessage(text=f"⚠️ {error}")])
+            return
+
+        # 暫存 session
+        session_set(user_id, ocr_text, image_b64)
+
+        # 預覽文字（前 200 字）
+        preview = ocr_text[:200]
+        if len(ocr_text) > 200:
+            preview += "..."
+
+        # 回覆預覽 + Quick Reply
+        reply_message(event, [
+            TextMessage(
+                text=f"📄 文字預覽：\n\n{preview}\n\n請選擇處理方式：",
+                quick_reply=QuickReply(
+                    items=[
+                        QuickReplyItem(
+                            action=PostbackAction(
+                                label="📝 報告審稿",
+                                data=json.dumps({"action": "proofread"}),
+                                display_text="報告審稿",
+                            )
+                        ),
+                        QuickReplyItem(
+                            action=PostbackAction(
+                                label="📋 文字提取",
+                                data=json.dumps({"action": "extract"}),
+                                display_text="文字提取",
+                            )
+                        ),
+                    ]
+                ),
             )
-        )
+        ])
+
+    except Exception as e:
+        logger.error(f"Image processing failed: {e}")
+        reply_message(event, [TextMessage(text=f"圖片處理失敗：{str(e)}")])
+
+
+# --- Postback handler ---
+
+
+@handler.add(PostbackEvent)
+def handle_postback(event):
+    user_id = event.source.user_id
+    try:
+        data = json.loads(event.postback.data)
+    except (json.JSONDecodeError, AttributeError):
+        reply_message(event, [TextMessage(text="操作無效，請重新傳送圖片。")])
+        return
+
+    action = data.get("action")
+    session = session_get(user_id)
+
+    if not session:
+        reply_message(event, [TextMessage(text="⏰ 操作已過期，請重新傳送圖片。")])
+        return
+
+    ocr_text = session["ocr_text"]
+
+    if action == "extract":
+        # 文字提取：直接回傳全文
+        # LINE 訊息上限 5000 字元
+        if len(ocr_text) <= 5000:
+            reply_message(event, [TextMessage(text=ocr_text)])
+        else:
+            # 分段回覆
+            chunks = [ocr_text[i:i+5000] for i in range(0, len(ocr_text), 5000)]
+            reply_message(event, [TextMessage(text=chunk) for chunk in chunks[:5]])
+
+    elif action == "proofread":
+        try:
+            result = proofread_text(ocr_text)
+            reply_message(event, [TextMessage(text=f"📝 審稿結果：\n\n{result}")])
+        except Exception as e:
+            logger.error(f"Proofread failed: {e}")
+            reply_message(event, [TextMessage(text=f"審稿失敗：{str(e)}")])
+
+    else:
+        reply_message(event, [TextMessage(text="未知操作，請重新傳送圖片。")])
 
 
 @handler.add(MessageEvent)
