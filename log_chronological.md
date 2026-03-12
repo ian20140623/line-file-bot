@@ -46,6 +46,27 @@
 
 ---
 
+## 2026-03-12：圖片接收 + GPT-4o 多模態分析 [NB]
+
+### 新增
+- `handle_image_message`：接收 LINE 圖片訊息，下載圖片 bytes
+- `analyze_image_with_gpt4o`：圖片 base64 編碼後送 GPT-4o，回傳繁體中文描述+文字擷取
+- 新增環境變數 `OPENAI_API_KEY`
+- `requirements.txt` 加入 `openai>=1.0.0`
+
+### 架構決策
+- 圖片不落地儲存，直接記憶體中 base64 編碼送 API — 避免暫存檔管理
+- GPT-4o 而非 Claude — 用戶指定
+- Prompt 固定為繁體中文描述+文字擷取，Phase B 再加分流選單
+
+### 建立 ROADMAP.md
+- Phase A（本次）：圖片 + AI 基礎
+- Phase B：分流處理（圖片/PDF/行程）
+- Phase C：互動強化（Quick Reply / Flex Message）
+- Phase D：基礎設施（搬遷部署、持久化儲存）
+
+---
+
 ## 待解決
 
 - **Render 免費方案限制** — 15 分鐘無流量會休眠，喚醒需約 30 秒

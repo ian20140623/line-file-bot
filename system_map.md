@@ -10,7 +10,8 @@
 ---
 
 ## 系統目標
-自動接收 LINE 群組或私訊中分享的文件檔案，下載並儲存到本地，回傳確認訊息。
+- 自動接收 LINE 群組或私訊中分享的文件檔案，下載並儲存到本地，回傳確認訊息。
+- 接收圖片訊息，送 GPT-4o 多模態模型分析，將理解結果回傳 LINE 對話。
 
 ---
 
@@ -23,6 +24,7 @@
 | Flask 3.1.0 | Web 框架（HTTP 端點） |
 | Gunicorn 23.0.0 | Production WSGI Server |
 | line-bot-sdk 3.22.0 | LINE Messaging API SDK |
+| openai (Python SDK) | GPT-4o 多模態圖片分析 |
 | Render | 部署平台（免費方案） |
 
 ---
@@ -46,7 +48,14 @@
 - 檔名清理特殊字元 + 加時間戳（`name_YYYYmmdd_HHMMSS.ext`）
 - 儲存到 `DOWNLOAD_DIR`（預設 `./downloaded_files`）
 
-### 4. 健康檢查 (`/`)
+### 4. 圖片處理 (`handle_image_message`)
+- 收到圖片訊息時觸發
+- 用 `MessagingApiBlob.get_message_content()` 下載圖片
+- 圖片 base64 編碼後送 GPT-4o (`analyze_image_with_gpt4o`)
+- Prompt：繁體中文描述圖片內容 + 擷取文字
+- 回傳分析結果到 LINE 對話
+
+### 5. 健康檢查 (`/`)
 - GET 請求回傳 "OK"
 - 供 uptime monitoring 服務定期 ping，維持 Render 免費方案不休眠
 
@@ -90,6 +99,7 @@
 | `LINE_CHANNEL_ACCESS_TOKEN` | Bot 認證 Token |
 | `LINE_CHANNEL_SECRET` | Webhook 簽名驗證 |
 | `DOWNLOAD_DIR` | 檔案儲存目錄（預設 `./downloaded_files`） |
+| `OPENAI_API_KEY` | OpenAI API Key（GPT-4o 圖片分析） |
 | `PORT` | 伺服器埠號（預設 5000） |
 
 ---
@@ -102,7 +112,7 @@
 | Render 免費方案休眠 | 15 分鐘無流量自動休眠，喚醒需約 30 秒 | Health check endpoint + 外部 uptime monitoring |
 | 暫存性儲存 | Render 重啟後檔案消失 | 未來可改接雲端儲存（Google Drive、S3） |
 | LINE 檔案過期 | LINE 伺服器上的檔案有時效限制 | Webhook 即時下載，不做延遲處理 |
-| 僅支援文件類型 | 圖片、影片、音訊不處理 | 設計選擇：專注於文件檔案 |
+| 僅支援文件+圖片 | 影片、音訊不處理 | 設計選擇：文件下載 + 圖片 AI 分析 |
 
 ---
 
@@ -137,6 +147,7 @@ line-file-bot/
 - [x] 基本檔案下載功能
 - [x] Python 3.12 相容性修復（line-bot-sdk 升級）
 - [x] Health check endpoint
-- [ ] 接入持久化儲存（Google Drive / S3），解決 Render 重啟檔案消失問題
-- [ ] 考慮支援圖片/影片等多媒體類型
-- [ ] 加入錯誤通知機制（下載失敗時通知管理者）
+- [x] 圖片接收 + GPT-4o 多模態分析
+- [ ] 圖片/PDF 分流處理（Quick Reply 選單）
+- [ ] 接入持久化儲存（Google Drive / S3）
+- [ ] 加入錯誤通知機制

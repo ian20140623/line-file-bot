@@ -22,7 +22,6 @@
 以上檔案不存在就跳過，不要報錯。
 每個步驟都要向用戶顯示目前正在做什麼（例如「正在讀取 system_map.md...」）。
 
-## 收工：LCP（Log → Commit → Push）
-- Log：更新 log_chronological.md（如有系統變更，同步更新 system_map.md）
-- Commit：log 和程式碼一起 commit
-- Push：commit 後 push 到 GitHub
+## 收工：LCP
+
+見 ../shared/CLAUDE.md（含 ROADMAP 同步規則）

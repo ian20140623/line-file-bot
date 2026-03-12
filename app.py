@@ -1,10 +1,12 @@
 """
-LINE Bot - 自動下載朋友傳來的文件檔案
-支援檔案類型：PDF、Word、Excel、PowerPoint、純文字等文件
+LINE Bot - 自動下載文件檔案 + 圖片 AI 理解
+- 文件：自動下載儲存
+- 圖片：送 GPT-4o 多模態理解，回傳分析結果
 """
 
 import os
 import re
+import base64
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -26,9 +28,11 @@ from linebot.v3.webhooks import (
     AudioMessageContent,
 )
 from linebot.v3.messaging.api import MessagingApiBlob
+from openai import OpenAI
 
 CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 DOWNLOAD_DIR = os.environ.get("DOWNLOAD_DIR", "./downloaded_files")
 
 DOCUMENT_EXTENSIONS = {
@@ -43,6 +47,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
+openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 Path(DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
 
 
@@ -106,6 +111,57 @@ def handle_file_message(event):
     else:
         ext = os.path.splitext(filename)[1]
         reply_text = f"Received {filename}, but {ext} is not in the auto-download list."
+    with ApiClient(configuration) as api_client:
+        messaging_api = MessagingApi(api_client)
+        messaging_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=reply_text)],
+            )
+        )
+
+
+def analyze_image_with_gpt4o(image_bytes):
+    if not openai_client:
+        return "⚠️ OPENAI_API_KEY 未設定，無法分析圖片。"
+    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+    response = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "請用繁體中文描述這張圖片的內容。如果圖片中有文字，請一併擷取出來。",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{b64_image}",
+                        },
+                    },
+                ],
+            }
+        ],
+        max_tokens=1000,
+    )
+    return response.choices[0].message.content
+
+
+@handler.add(MessageEvent, message=ImageMessageContent)
+def handle_image_message(event):
+    message_id = event.message.id
+    logger.info(f"Received image: message_id={message_id}")
+    try:
+        with ApiClient(configuration) as api_client:
+            blob_api = MessagingApiBlob(api_client)
+            image_bytes = blob_api.get_message_content(message_id)
+        logger.info(f"Image downloaded: {len(image_bytes)} bytes")
+        reply_text = analyze_image_with_gpt4o(image_bytes)
+    except Exception as e:
+        logger.error(f"Image analysis failed: {e}")
+        reply_text = f"圖片分析失敗：{str(e)}"
     with ApiClient(configuration) as api_client:
         messaging_api = MessagingApi(api_client)
         messaging_api.reply_message(
