@@ -211,6 +211,20 @@
 - 語音處理順延為 Phase G
 - 決策考量：Gemini 免費 250K TPM vs Anthropic 30K TPM，事實查核適合優先切 Gemini
 
+### 07:03 [DESKTOP] ROADMAP 整理：Obsidian 連結 + PDF 分流 + broker-reports Phase B
+
+#### line-file-bot ROADMAP
+- 新增 E5：Obsidian 筆記連結（純文字摘要 + `obsidian://` URI + HTML 中繼頁）
+- B2 PDF 分流加入前置說明：需先改 broker-reports 的 PDF 留存流程
+- 「報告審核」→「事實查核」同步（B2 非券商報告選項）
+
+#### broker-reports ROADMAP（跨專案）
+- 新增獨立 Phase B：PDF 本機留存（架構變更）
+  - 現狀 PDF 處理完不留本機 → 改為留存在同步資料夾
+  - 驅動來源：line-file-bot B2 PDF 分流需要本機有 PDF
+- 原 B~J 全部順延為 C~K
+- 決策：PDF 留存是架構性變更，獨立為高優先 Phase 而非塞進 Highlight 整合
+
 ---
 
 ## 待解決

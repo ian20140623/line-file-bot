@@ -39,13 +39,14 @@
       加入md
       有可能是精品/科技產品
 - [ ] B2. PDF 智慧分流
+  > ⚠️ 前置：需先改 [broker-reports](../broker-reports/) 流程（PDF 留存方式從 Gmail → 本機同步資料夾 + 畫記/書籤同步進 .md）→ 見該專案 ROADMAP
   - [ ] 收到 PDF（通常一批）→ 自動判斷是否為券商報告
   - [ ] **是券商報告** → 同一批一起問用戶：
     1. 快速摘要
     2. 詳細摘要
     3. 閱讀內文的文字擷取版（去除 ESG）
-    4. 存檔至預設雲端硬碟 + 去重 + 走 broker-reports 流程提取 MD
-  - [ ] **非券商報告** → 問用戶：「1. 報告審核  2. 文字提取」
+    4. 存檔至本機同步資料夾 + 去重 + 走 broker-reports 流程提取 MD
+  - [ ] **非券商報告** → 問用戶：「1. 事實查核  2. 文字提取」
   - [ ] 去重機制：content hash 比對已處理檔案
 - [x] B3. 行程/會議解析
   - [x] 偵測行程/會議相關內容（文字、圖片皆可）
@@ -76,6 +77,10 @@
 - [ ] E2. 主題整理（如「整理台積電個股報告」「整理美伊戰爭」）
 - [ ] E3. 處理狀態通知（收到訊息回覆「處理中」，太久回報進度）
 - [ ] E4. 結果輸出：LINE 傳文字版 + Obsidian 傳完整 .md
+- [ ] E5. Obsidian 筆記連結
+  - 寫入 .md 後回傳純文字摘要（簡版）+ 可點擊連結
+  - `/note/<file_id>` HTML 中繼頁（複用 `/cal/` 模式，避免 LINE in-app browser 攔截 `obsidian://`）
+  - Obsidian URI：`obsidian://open?vault=...&file=...`，手機+電腦都能直接開啟
 
 ## Phase F：多模型 Fallback（Rate Limit 對策）
 > 背景：Anthropic Sonnet 目前 30K input tokens/min，事實查核容易撞限
