@@ -11,8 +11,9 @@
 
 ## 系統目標
 - 自動接收 LINE 群組或私訊中分享的文件檔案，下載並儲存到本地，回傳確認訊息。
-- 接收圖片訊息，Claude Sonnet OCR 提取文字，支援審稿/提取分流。
-- 文字對話：Claude Haiku 帶記憶對話（最近 10 輪，30 分鐘 TTL）。
+- 接收圖片訊息，Claude Sonnet OCR + AI 自動分類（行程/酒標/報告/一般），動態 Quick Reply 分流。
+- 文字訊息自動偵測行程 → 解析 + 產 .ics 行事曆檔；非行程 → Claude Opus 4.6 對話。
+- 文字對話：Claude Opus 4.6 帶記憶對話（最近 10 輪，30 分鐘 TTL）。
 
 ---
 
@@ -50,22 +51,30 @@
 - 檔名清理特殊字元 + 加時間戳（`name_YYYYmmdd_HHMMSS.ext`）
 - 儲存到 `DOWNLOAD_DIR`（預設 `./downloaded_files`）
 
-### 4. 圖片分流 (`handle_image_message` → `handle_postback`)
-- 收到圖片 → 下載 → Claude Sonnet OCR 提取文字
-- 回覆文字預覽（前 200 字）+ Quick Reply 按鈕
-- 用戶選擇：
-  - **文字提取**：回傳 OCR 全文
-  - **報告審稿**：Claude Sonnet 校對（錯字、標點、異常空白）
-- In-memory session 暫存 OCR 結果（TTL 10 分鐘）
+### 4. 圖片智慧分流 (`handle_image_message` → `handle_postback`)
+- 收到圖片 → 下載 → `ocr_and_classify()`：Claude Sonnet 單次 API call 做 OCR + 內容分類
+- 分類結果：`schedule` / `wine_label` / `report` / `general`
+- 動態 Quick Reply：
+  - 偵測到特定類型 → 2 按鈕（判定選項 + 「其他」）
+  - `general` → 4 按鈕全展開（行程解析/酒標辨識/報告審稿/文字提取）
+- Postback handler 處理選擇：文字提取、報告審稿、行程解析、酒標辨識（placeholder）、show_all
+- In-memory session 暫存 OCR 結果 + content_type（TTL 10 分鐘）
 
-### 5. 文字對話 (`handle_text_message`)
-- 收到文字訊息 → 帶歷史記錄送 Claude Opus 4.6
+### 5. 文字訊息處理 (`handle_text_message`)
+- 收到文字 → `classify_text()` 判斷是否為行程（Claude Sonnet，max_tokens=10）
+- **行程** → `parse_schedule()` 解析 JSON → `generate_ics()` 產 .ics → 回傳摘要 + 下載連結
+- **非行程** → 帶歷史記錄送 Claude Opus 4.6 對話
 - 每用戶最近 10 輪對話記憶，30 分鐘 TTL
-- Chat history 與 image session 分開存放
 
-### 6. 健康檢查 (`/`)
+### 6. 行程解析 + .ics 生成
+- `parse_schedule()`：Claude Sonnet 從文字/OCR 結果提取行程 JSON
+- `generate_ics()`：JSON → .ics 檔（含 VTIMEZONE Asia/Taipei、METHOD:PUBLISH、建立時間戳在 DESCRIPTION）
+- `/ics/<filename>` route：強制下載 .ics（Content-Type: application/octet-stream）
+- `/cal/<file_id>` route：HTML 中繼頁，綠色下載按鈕，避免 LINE in-app browser 攔截 .ics URL
+- 檔案存放於 `generated_ics/` 目錄
+
+### 7. 健康檢查 (`/`)
 - GET 請求回傳 "OK"
-- 供 uptime monitoring 服務定期 ping，維持 Render 免費方案不休眠
 
 ---
 
@@ -111,6 +120,8 @@
 | `DOWNLOAD_DIR` | 檔案儲存目錄（預設 `./downloaded_files`） |
 | `ANTHROPIC_API_KEY` | Anthropic API Key（Claude OCR/審稿/對話） |
 | `PORT` | 伺服器埠號（預設 5000） |
+| `BASE_URL` | 公開 URL（ngrok），用於產生 .ics 下載連結 |
+| `HOST_ICS_DIR` | 本機 .ics 檔案存放路徑 |
 
 ---
 
@@ -122,6 +133,8 @@
 | ngrok 網址不固定 | 免費版每次重啟換網址 | 手動更新 LINE Webhook URL；未來考慮 Cloudflare Tunnel |
 | LINE 檔案過期 | LINE 伺服器上的檔案有時效限制 | Webhook 即時下載，不做延遲處理 |
 | 僅支援文件+圖片+文字 | 影片、音訊不處理 | 設計選擇：文件下載 + 圖片 AI 分析 + 文字對話 |
+| 文字分類額外 API call | 每則文字訊息多一次 Sonnet call（~0.5s） | 未來可改關鍵字預篩 |
+| In-memory session | 重啟歸零 | 單 worker 夠用，可接受 |
 
 ---
 
@@ -130,10 +143,10 @@
 
 ```
 line-file-bot/
-├── app.py                 # Flask 主程式（Webhook、檔案處理、AI 對話）
+├── app.py                 # Flask 主程式（Webhook、檔案處理、AI 分流、行程解析、對話）
 ├── requirements.txt       # Python 依賴（Flask、line-bot-sdk、Gunicorn、anthropic）
 ├── Dockerfile             # Docker 映像定義（Python 3.12-slim + Gunicorn）
-├── docker-compose.yml     # Docker Compose 設定（port、env、volume）
+├── docker-compose.yml     # Docker Compose 設定（port、env、volume、TZ）
 ├── .dockerignore          # Docker build 排除清單
 ├── .env.example           # 環境變數範本
 ├── .env                   # 環境變數（不進 git）
@@ -141,7 +154,9 @@ line-file-bot/
 ├── .python-version        # Python 版本（3.12.6）
 ├── ROADMAP.md             # 開發路線圖
 ├── log_chronological.md   # 開發記錄 — 流水帳
-└── system_map.md          # 現況快照 — 功能說明
+├── system_map.md          # 現況快照 — 功能說明
+├── generated_ics/         # .ics 行事曆檔輸出目錄（不進 git）
+└── downloaded_files/      # 下載檔案目錄（不進 git）
 ```
 
 ---
@@ -167,6 +182,9 @@ line-file-bot/
 - [x] OpenAI → Anthropic 遷移
 - [x] 文字對話功能（Claude Opus 4.6 + 記憶）
 - [x] 本機部署（Docker + ngrok）
+- [x] 圖片智慧分流（OCR + AI 分類 + 動態 Quick Reply）
+- [x] 行程解析 + .ics 生成（圖片/文字皆可）
+- [x] 文字訊息自動偵測行程
 - [ ] Obsidian vault 查詢（搜尋 + Claude 分析）
-- [ ] PDF 生成 + LINE 傳檔
+- [ ] PDF 智慧分流
 - [ ] 加入錯誤通知機制

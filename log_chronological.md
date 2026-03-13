@@ -147,6 +147,38 @@
 - ngrok 免費版每次重啟換網址，需重新更新 LINE Webhook URL
 - 未來可考慮 Cloudflare Tunnel（免費固定域名）或 ngrok 付費方案
 
+### 23:32 [DESKTOP] B3 行程解析 + 圖片智慧分流 + 文字行程偵測
+
+#### B3 行程/會議解析（完成）
+- 新增 `parse_schedule()`：Claude Sonnet 從文字提取行程 JSON
+- 新增 `generate_ics()`：結構化 JSON → .ics 行事曆檔
+  - 含 VTIMEZONE（Asia/Taipei）、METHOD:PUBLISH、建立時間戳記在 DESCRIPTION
+- 新增 `format_schedule_text()`：行程 JSON → LINE 可讀摘要
+- 新增 `/ics/<filename>` route：強制下載 .ics（避免 iOS 訂閱問題）
+- 新增 `/cal/<file_id>` route：HTML 下載頁，LINE in-app browser 不會攔截
+- Postback handler 加入 "schedule" action
+- `docker-compose.yml` 加入 `generated_ics` volume mount + `TZ=Asia/Taipei`
+- `.env` 加入 `BASE_URL`（ngrok URL）、`HOST_ICS_DIR`（本機路徑）
+
+#### 圖片智慧分流
+- `ocr_image()` → `ocr_and_classify()`：OCR + AI 自動判斷內容類型（schedule/wine_label/report/general）
+- Quick Reply 改為動態：判定特定類型 → 2 按鈕（判定選項 + 其他）；general → 4 按鈕全展開
+- 新增 `_all_action_items()` helper
+- 新增 "show_all" postback：展開所有選項
+- 新增 "wine" postback：酒標辨識 placeholder
+
+#### 文字訊息自動行程偵測
+- 新增 `classify_text()`：Claude Sonnet 判斷文字是否為行程（schedule/chat）
+- `handle_text_message` 改為：先分類 → schedule 自動解析+產 .ics → 否則走正常聊天
+- trade-off：每則文字多一次 API call（~0.5s），未來可改關鍵字預篩
+
+#### ROADMAP 整理
+- A2 改為 Claude API（原寫 GPT-4o）
+- B1/B3/C1 已完成項目打勾
+- 酒標辨識歸入 B1 子項
+- 新增 Phase E（Obsidian 操作）、Phase F（語音處理）
+- 散落的想法整理進正式結構
+
 ---
 
 ## 待解決
