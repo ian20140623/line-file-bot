@@ -1,6 +1,6 @@
 # ROADMAP — line-file-bot
 
-*last updated: 2026-03-13*
+*last updated: 2026-03-14*
 
 ## ✅ Phase A：圖片 + AI 基礎（最小起步）
 - [x] A1. 加 ImageMessage handler — 接收圖片
@@ -22,14 +22,17 @@
     - 報告 → 辨識名稱、券商、作者等 metadata
     - 同一批（30 分鐘內，或用戶指定）合併
     - 連同 highlight 文字 + metadata 存成 .md
-  - [ ] 報告審稿進階：事實查核
-    - 辨識文中引用的新聞事件（尤其數字）
-    - 列出偵測到的新聞事件，讓用戶勾選要確認哪些
-    - 選定的事件：搜尋對照新聞，回傳連結供比對
+  - [x] 事實查核（原「報告審稿進階」）
+    - 自動挑選 10 個數字 + 5 個重要事實，用 web_search 工具上網求證
+    - 錯誤率 >20% 自動深度查核
+    - 背景執行 + push_message 非同步回傳結果
+    - 長文字（>200 字元）自動偵測，Quick Reply 問「事實查核 or 聊聊內容」
   - [ ] 酒標辨識（框架已接好，待實作）
     - 辨識酒名 / 葡萄品種 / 產地
     - 回傳發音（酒名、葡萄、地名）
     - 在 Obsidian 建立 .md（分類：啤酒/白酒/紅酒/威士忌/清酒/其他）
+    以 類型-酒名-年份-評論日期 的格式建立 (酒名請AI自行判斷完整名稱為何)
+      方便同一酒多次品嘗的比較
     - 問用戶喝的感覺，記錄到 .md
     - 加入外界評論及連結
     品牌/地名/商標名/人名發音
@@ -74,9 +77,15 @@
 - [ ] E3. 處理狀態通知（收到訊息回覆「處理中」，太久回報進度）
 - [ ] E4. 結果輸出：LINE 傳文字版 + Obsidian 傳完整 .md
 
-## Phase F：語音處理
-- [ ] F1. Whisper API 語音轉文字
-- [ ] F2. 轉錄結果回傳 LINE
+## Phase F：多模型 Fallback（Rate Limit 對策）
+> 背景：Anthropic Sonnet 目前 30K input tokens/min，事實查核容易撞限
+- [ ] F1. Gemini API 接入（免費 250K TPM，事實查核優先切換）
+- [ ] F2. Multi-provider fallback：Anthropic 429 → 自動切 Gemini
+- [ ] F3. 評估 Anthropic 升級方案（Build tier $40-100/mo → 80K TPM）
+
+## Phase G：語音處理
+- [ ] G1. Whisper API 語音轉文字
+- [ ] G2. 轉錄結果回傳 LINE
 
 ---
 

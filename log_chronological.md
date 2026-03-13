@@ -181,6 +181,38 @@
 
 ---
 
+## 2026-03-14（週五）
+
+### 00:18 [DESKTOP] 事實查核功能 + Rate Limit 對策 + ROADMAP 新增 Phase F
+
+#### 「報告審稿」→「事實查核」全面重寫
+- 舊功能只做校對錯字，改為上網求證事實
+- 全部 UI label 改名：「報告審稿」→「事實查核」
+- 新增 `identify_claims_for_check()`：AI 自動選取 10 個數字聲明 + 5 個重要事實
+- 新增 `verify_claims_with_search()`：用 Anthropic `web_search_20250305` 工具上網搜尋求證
+- 新增 `_run_fact_check()`：背景執行完整流程（因 LINE reply token 30 秒過期）
+- 錯誤率 >20% 自動觸發深度查核（更多 web search）
+- 使用 `push_message()` 非同步推送結果（不受 reply token 限制）
+- 原 `proofread_text()` 保留但不再被呼叫
+
+#### 長文字自動偵測
+- `handle_text_message` 新增：>200 字元文字 → Quick Reply 問「事實查核 or 聊聊內容」
+- 新增 `text_chat` postback handler
+
+#### Rate Limit 對策
+- 新增 `claude_api_call()` retry wrapper：所有 Claude API call 統一走此函式
+- 遇到 429 → exponential backoff（30s → 60s → 120s，最多 3 次）
+- 各 handler 加入 `anthropic.RateLimitError` 捕捉，回覆友善提示
+- 背景：Anthropic Sonnet 30K input tokens/min，事實查核容易撞限
+
+#### ROADMAP 更新
+- 事實查核標記完成（B1 子項）
+- 新增 Phase F：多模型 Fallback（Gemini 接入、multi-provider、Anthropic 升級評估）
+- 語音處理順延為 Phase G
+- 決策考量：Gemini 免費 250K TPM vs Anthropic 30K TPM，事實查核適合優先切 Gemini
+
+---
+
 ## 待解決
 
 - **ngrok 網址不固定** — 免費版每次重啟換網址，需手動更新 LINE Webhook URL

@@ -1,5 +1,5 @@
 # LINE File Bot 開發記錄 — 功能說明
-*last updated: 2026-03-13*
+*last updated: 2026-03-14*
 
 > **給未來 AI 的說明**
 > 共用指引見 [`../shared/LOG_GUIDE.md`](../shared/LOG_GUIDE.md)
@@ -12,21 +12,23 @@
 ## 系統目標
 - 自動接收 LINE 群組或私訊中分享的文件檔案，下載並儲存到本地，回傳確認訊息。
 - 接收圖片訊息，Claude Sonnet OCR + AI 自動分類（行程/酒標/報告/一般），動態 Quick Reply 分流。
-- 文字訊息自動偵測行程 → 解析 + 產 .ics 行事曆檔；非行程 → Claude Opus 4.6 對話。
+- 圖片/長文字事實查核：自動挑選數字+事實聲明 → web search 上網求證 → 背景執行+推送結果。
+- 文字訊息自動偵測行程 → 解析 + 產 .ics 行事曆檔；長文字（>200 字）→ 問事實查核 or 聊天；短文字 → Claude Opus 4.6 對話。
 - 文字對話：Claude Opus 4.6 帶記憶對話（最近 10 輪，30 分鐘 TTL）。
+- API 容錯：所有 Claude API call 統一走 retry wrapper（429 exponential backoff）。
 
 ---
 
 ## 技術架構
-*last updated: 2026-03-13*
+*last updated: 2026-03-14*
 
 | 元件 | 角色 |
 |------|------|
 | Python 3.12.6 | 執行環境 |
 | Flask 3.1.0 | Web 框架（HTTP 端點） |
 | Gunicorn 23.0.0 | Production WSGI Server |
-| line-bot-sdk 3.22.0 | LINE Messaging API SDK |
-| anthropic (Python SDK) | Claude Sonnet 4（OCR/審稿）、Opus 4.6（對話） |
+| line-bot-sdk 3.22.0 | LINE Messaging API SDK（含 PushMessageRequest） |
+| anthropic (Python SDK) | Claude Sonnet 4（OCR/事實查核/web search）、Opus 4.6（對話） |
 | Docker + Docker Compose | 容器化部署（本機桌機） |
 | ngrok 3.37.2 | HTTPS 隧道，暴露本機 port 給 LINE Webhook |
 
@@ -56,14 +58,22 @@
 - 分類結果：`schedule` / `wine_label` / `report` / `general`
 - 動態 Quick Reply：
   - 偵測到特定類型 → 2 按鈕（判定選項 + 「其他」）
-  - `general` → 4 按鈕全展開（行程解析/酒標辨識/報告審稿/文字提取）
-- Postback handler 處理選擇：文字提取、報告審稿、行程解析、酒標辨識（placeholder）、show_all
+  - `general` → 4 按鈕全展開（行程解析/酒標辨識/事實查核/文字提取）
+- Postback handler 處理選擇：文字提取、事實查核、行程解析、酒標辨識（placeholder）、show_all、text_chat
 - In-memory session 暫存 OCR 結果 + content_type（TTL 10 分鐘）
+
+### 4b. 事實查核（`_run_fact_check`，背景執行）
+- `identify_claims_for_check()`：AI 自動選取最多 10 個數字聲明 + 5 個重要事實
+- `verify_claims_with_search()`：使用 Anthropic `web_search_20250305` 工具上網搜尋求證
+- 結果用 `push_message()` 非同步推送（不受 LINE reply token 30 秒限制）
+- 錯誤率 >20% → 自動觸發深度查核（更多 web search）
+- 長文字（>5000 字）自動分段推送
 
 ### 5. 文字訊息處理 (`handle_text_message`)
 - 收到文字 → `classify_text()` 判斷是否為行程（Claude Sonnet，max_tokens=10）
 - **行程** → `parse_schedule()` 解析 JSON → `generate_ics()` 產 .ics → 回傳摘要 + 下載連結
-- **非行程** → 帶歷史記錄送 Claude Opus 4.6 對話
+- **長文字（>200 字元）** → Quick Reply 問「事實查核 or 聊聊內容」
+- **短文字非行程** → 帶歷史記錄送 Claude Opus 4.6 對話
 - 每用戶最近 10 輪對話記憶，30 分鐘 TTL
 
 ### 6. 行程解析 + .ics 生成
@@ -134,6 +144,7 @@
 | LINE 檔案過期 | LINE 伺服器上的檔案有時效限制 | Webhook 即時下載，不做延遲處理 |
 | 僅支援文件+圖片+文字 | 影片、音訊不處理 | 設計選擇：文件下載 + 圖片 AI 分析 + 文字對話 |
 | 文字分類額外 API call | 每則文字訊息多一次 Sonnet call（~0.5s） | 未來可改關鍵字預篩 |
+| Anthropic Rate Limit | Sonnet 30K input tokens/min，事實查核容易撞限 | claude_api_call() retry wrapper + 未來 Gemini fallback |
 | In-memory session | 重啟歸零 | 單 worker 夠用，可接受 |
 
 ---
@@ -185,6 +196,7 @@ line-file-bot/
 - [x] 圖片智慧分流（OCR + AI 分類 + 動態 Quick Reply）
 - [x] 行程解析 + .ics 生成（圖片/文字皆可）
 - [x] 文字訊息自動偵測行程
+- [ ] 多模型 Fallback（Gemini 接入，Rate Limit 對策）
 - [ ] Obsidian vault 查詢（搜尋 + Claude 分析）
 - [ ] PDF 智慧分流
 - [ ] 加入錯誤通知機制

@@ -1,7 +1,7 @@
 """
 LINE Bot - 自動下載文件檔案 + 圖片 AI 分流處理 + 文字對話 + 行程解析
 - 文件：自動下載儲存
-- 圖片：OCR 預覽 → Quick Reply 選模式（報告審稿 / 文字提取 / 行程解析）
+- 圖片：OCR 預覽 → Quick Reply 選模式（事實查核 / 文字提取 / 行程解析）
 - 文字：Claude 對話（帶記憶，最近 10 輪，30 分鐘 TTL）
 - 行程：從文字或圖片解析會議資訊，產出 .ics 行事曆檔
 """
@@ -24,6 +24,7 @@ from linebot.v3.messaging import (
     ApiClient,
     MessagingApi,
     ReplyMessageRequest,
+    PushMessageRequest,
     TextMessage,
     QuickReply,
     QuickReplyItem,
@@ -80,9 +81,19 @@ def session_set(user_id, ocr_text, image_b64, content_type="general"):
             "ocr_text": ocr_text,
             "image_b64": image_b64,
             "content_type": content_type,
+            "claims": [],  # 事實聲明（審稿後填入）
             "timestamp": time.time(),
         }
     _session_cleanup()
+
+
+def session_update(user_id, **kwargs):
+    """更新 session 中的指定欄位。"""
+    with _sessions_lock:
+        data = _sessions.get(user_id)
+        if data and (time.time() - data["timestamp"]) < SESSION_TTL:
+            data.update(kwargs)
+            data["timestamp"] = time.time()
 
 
 def session_get(user_id):
@@ -130,6 +141,37 @@ def chat_history_get(user_id):
         return []
 
 
+# --- API retry wrapper ---
+
+
+def claude_api_call(create_kwargs, max_retries=3):
+    """呼叫 Claude API，遇到 429 rate limit 自動重試（exponential backoff）。
+    create_kwargs: 傳給 claude_client.messages.create() 的參數 dict。
+    回傳 response 或 raise exception。
+    """
+    for attempt in range(max_retries):
+        try:
+            return claude_client.messages.create(**create_kwargs)
+        except anthropic.RateLimitError as e:
+            wait = 2 ** attempt * 30  # 30s, 60s, 120s
+            logger.warning(f"Rate limit hit (attempt {attempt + 1}/{max_retries}), waiting {wait}s...")
+            time.sleep(wait)
+            if attempt == max_retries - 1:
+                raise
+        except anthropic.APIStatusError as e:
+            if e.status_code == 429:
+                wait = 2 ** attempt * 30
+                logger.warning(f"429 error (attempt {attempt + 1}/{max_retries}), waiting {wait}s...")
+                time.sleep(wait)
+                if attempt == max_retries - 1:
+                    raise
+            else:
+                raise
+
+
+RATE_LIMIT_MSG = "⏳ API 流量限制中，請稍候 30 秒再試一次。"
+
+
 # --- Utility functions ---
 
 
@@ -170,6 +212,15 @@ def reply_message(event, messages):
         )
 
 
+def push_message(user_id, messages):
+    """主動推送訊息給用戶（不需 reply token）。"""
+    with ApiClient(configuration) as api_client:
+        messaging_api = MessagingApi(api_client)
+        messaging_api.push_message(
+            PushMessageRequest(to=user_id, messages=messages)
+        )
+
+
 # --- Claude API functions ---
 
 
@@ -179,10 +230,10 @@ def ocr_and_classify(image_b64):
     """
     if not claude_client:
         return None, None, "ANTHROPIC_API_KEY 未設定，無法分析圖片。"
-    response = claude_client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=2000,
-        messages=[
+    response = claude_api_call({
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 2000,
+        "messages": [
             {
                 "role": "user",
                 "content": [
@@ -213,7 +264,7 @@ def ocr_and_classify(image_b64):
                 ],
             }
         ],
-    )
+    })
     raw = response.content[0].text
     lines = raw.strip().split("\n", 1)
     content_type = lines[0].strip().lower()
@@ -228,21 +279,19 @@ def classify_text(text):
     """判斷文字是否包含行程/會議資訊。回傳 content_type: "schedule" / "chat"。"""
     if not claude_client:
         return "chat"
-    response = claude_client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=10,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "判斷以下文字是否包含具體的行程、會議、約會資訊"
-                    "（有明確的日期/時間/事件）。\n"
-                    "只回答一個字：schedule 或 chat\n\n"
-                    f"{text[:500]}"
-                ),
-            }
-        ],
-    )
+    response = claude_api_call({
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 10,
+        "messages": [{
+            "role": "user",
+            "content": (
+                "判斷以下文字是否包含具體的行程、會議、約會資訊"
+                "（有明確的日期/時間/事件）。\n"
+                "只回答一個字：schedule 或 chat\n\n"
+                f"{text[:500]}"
+            ),
+        }],
+    })
     result = response.content[0].text.strip().lower()
     logger.info(f"Text classified as: {result}")
     return "schedule" if "schedule" in result else "chat"
@@ -254,12 +303,12 @@ def chat_with_claude(user_id, user_message):
         return "ANTHROPIC_API_KEY 未設定。"
     chat_history_append(user_id, "user", user_message)
     messages = chat_history_get(user_id)
-    response = claude_client.messages.create(
-        model="claude-opus-4-20250514",
-        max_tokens=1000,
-        system="你是一個友善的繁體中文助手。回覆請簡潔扼要。",
-        messages=messages,
-    )
+    response = claude_api_call({
+        "model": "claude-opus-4-20250514",
+        "max_tokens": 1000,
+        "system": "你是一個友善的繁體中文助手。回覆請簡潔扼要。",
+        "messages": messages,
+    })
     reply = response.content[0].text
     chat_history_append(user_id, "assistant", reply)
     return reply
@@ -269,10 +318,10 @@ def proofread_text(text):
     """報告審稿：校對錯字、標點、空白。"""
     if not claude_client:
         return "ANTHROPIC_API_KEY 未設定。"
-    response = claude_client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=2000,
-        system=(
+    response = claude_api_call({
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 2000,
+        "system": (
             "你是繁體中文校對專家。請針對以下文字進行：\n"
             "1. 錯字修正\n"
             "2. 標點符號修正\n"
@@ -280,11 +329,237 @@ def proofread_text(text):
             "用「原文 → 修正」格式列出所有問題。"
             "如果沒有問題，回覆「未發現錯誤」。"
         ),
-        messages=[
+        "messages": [
             {"role": "user", "content": text},
         ],
-    )
+    })
     return response.content[0].text
+
+
+def identify_claims_for_check(text):
+    """識別文中事實聲明，自動選取查核目標。
+    數字相關：最多 10 個（不足全選）；其他重要事實：最重要 5 個。
+    回傳 (number_claims, fact_claims)
+    """
+    if not claude_client:
+        return [], []
+    response = claude_api_call({
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 3000,
+        "messages": [{
+            "role": "user",
+            "content": (
+                "分析以下文字，找出所有可查核的事實聲明。\n\n"
+                "分兩類輸出：\n\n"
+                "【數字類】含具體數字的聲明（營收、成長率、市佔率、價格、數量等）。\n"
+                "選取規則：最多 10 個，不足 10 個就全部列出。\n\n"
+                "【事實類】不含數字但可查核的事實（事件、政策、人事、引述等）。\n"
+                "選取規則：選最重要的 5 個。\n\n"
+                "輸出格式（嚴格遵守，不要加多餘說明）：\n"
+                "===NUMBER===\n"
+                "1|聲明摘要|原文片段\n"
+                "2|聲明摘要|原文片段\n"
+                "===FACT===\n"
+                "1|聲明摘要|原文片段\n"
+                "2|聲明摘要|原文片段\n\n"
+                "如果某類別沒有聲明，該區塊寫 NONE\n\n"
+                f"文字內容：\n{text}"
+            ),
+        }],
+    })
+    raw = response.content[0].text.strip()
+    number_claims = []
+    fact_claims = []
+    current_section = None
+
+    for line in raw.split("\n"):
+        line = line.strip()
+        if "===NUMBER===" in line:
+            current_section = "number"
+            continue
+        elif "===FACT===" in line:
+            current_section = "fact"
+            continue
+        if not line or line == "NONE":
+            continue
+        parts = line.split("|", 2)
+        if len(parts) >= 2:
+            try:
+                claim_id = int(parts[0].strip())
+            except ValueError:
+                continue
+            claim = {
+                "id": claim_id,
+                "claim": parts[1].strip(),
+                "source": parts[2].strip() if len(parts) > 2 else "",
+            }
+            if current_section == "number":
+                number_claims.append(claim)
+            elif current_section == "fact":
+                fact_claims.append(claim)
+
+    logger.info(f"Claims identified: {len(number_claims)} numbers, {len(fact_claims)} facts")
+    return number_claims, fact_claims
+
+
+def verify_claims_with_search(number_claims, fact_claims, original_text):
+    """使用網路搜尋查核事實聲明。回傳 (report_text, stats)。"""
+    if not claude_client:
+        return "ANTHROPIC_API_KEY 未設定。", {}
+
+    # 組裝聲明列表（統一編號）
+    claims_parts = []
+    global_id = 0
+    if number_claims:
+        claims_parts.append("【數字類聲明】")
+        for c in number_claims:
+            global_id += 1
+            claims_parts.append(f"{global_id}. {c['claim']}")
+            if c['source']:
+                claims_parts.append(f"   原文：「{c['source'][:100]}」")
+    if fact_claims:
+        claims_parts.append("\n【事實類聲明】")
+        for c in fact_claims:
+            global_id += 1
+            claims_parts.append(f"{global_id}. {c['claim']}")
+            if c['source']:
+                claims_parts.append(f"   原文：「{c['source'][:100]}」")
+
+    claims_str = "\n".join(claims_parts)
+
+    response = claude_api_call({
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 16000,
+        "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 20}],
+        "messages": [{
+            "role": "user",
+            "content": (
+                "你是事實查核專家。請逐一上網搜尋求證以下聲明。\n\n"
+                "對每個聲明：\n"
+                "1. 用網路搜尋找相關新聞、報告、官方資料\n"
+                "2. 判斷：✅ 已確認 / ⚠️ 無法確認 / ❌ 有誤\n"
+                "3. 簡述佐證或反證\n"
+                "4. 附上參考來源網址\n\n"
+                f"原文摘要：\n{original_text[:1000]}\n\n"
+                f"需查核的聲明：\n{claims_str}\n\n"
+                "回覆用繁體中文。"
+            ),
+        }],
+    })
+
+    # 從回應中提取文字（跳過 web search 結果 block）
+    result_text = ""
+    for block in response.content:
+        if hasattr(block, "type") and block.type == "text":
+            result_text += block.text
+
+    # 統計判定結果
+    stats = {
+        "confirmed": result_text.count("✅"),
+        "uncertain": result_text.count("⚠️"),
+        "wrong": result_text.count("❌"),
+    }
+    logger.info(f"Fact check stats: {stats}")
+    return result_text, stats
+
+
+def _run_fact_check(user_id, text):
+    """背景執行事實查核完整流程。"""
+    try:
+        # Step 1: 識別並選取聲明
+        number_claims, fact_claims = identify_claims_for_check(text)
+        total_selected = len(number_claims) + len(fact_claims)
+
+        if total_selected == 0:
+            push_message(user_id, [TextMessage(
+                text="🔎 未在文字中偵測到可查核的事實聲明。"
+            )])
+            return
+
+        push_message(user_id, [TextMessage(
+            text=f"🔎 找到 {len(number_claims)} 個數字聲明 + {len(fact_claims)} 個事實聲明，正在上網查核..."
+        )])
+
+        # Step 2: 上網查核
+        report, stats = verify_claims_with_search(number_claims, fact_claims, text)
+
+        total_checked = sum(stats.values())
+        error_rate = stats["wrong"] / total_checked if total_checked > 0 else 0
+
+        # Step 3: 組裝報告
+        summary = (
+            f"\n━━ 查核摘要 ━━\n"
+            f"✅ 已確認：{stats['confirmed']} 項\n"
+            f"⚠️ 無法確認：{stats['uncertain']} 項\n"
+            f"❌ 有誤：{stats['wrong']} 項\n"
+            f"錯誤率：{error_rate:.0%}"
+        )
+        full_report = (
+            f"🔍 事實查核報告\n"
+            f"查核 {total_checked} 項（數字 {len(number_claims)} + 事實 {len(fact_claims)}）\n\n"
+            f"{report}\n{summary}"
+        )
+
+        # LINE 5000 字元限制 — 分段送出
+        if len(full_report) <= 5000:
+            push_message(user_id, [TextMessage(text=full_report)])
+        else:
+            chunks = [full_report[i:i + 4900] for i in range(0, len(full_report), 4900)]
+            for chunk in chunks[:5]:
+                push_message(user_id, [TextMessage(text=chunk)])
+
+        # Step 4: 高錯誤率 → 主動更深入查核
+        if error_rate > 0.2 and total_checked > 0:
+            push_message(user_id, [TextMessage(
+                text=f"⚠️ 錯誤率 {error_rate:.0%} 超過 20%！正在進行更深入的查核..."
+            )])
+
+            deeper_response = claude_api_call({
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 16000,
+                "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 30}],
+                "messages": [{
+                    "role": "user",
+                    "content": (
+                        "前一輪事實查核發現錯誤率超過 20%，需要更深入查核。\n"
+                        "請重新檢視以下文字中的所有數字和事實聲明，不限數量。\n"
+                        "特別注意與已確認有誤的聲明相似的模式。\n\n"
+                        f"原文：\n{text}\n\n"
+                        f"前一輪結果：\n{summary}\n\n"
+                        "對每個新發現的問題：\n"
+                        "1. 上網搜尋求證\n"
+                        "2. 判斷：✅ 已確認 / ⚠️ 無法確認 / ❌ 有誤\n"
+                        "3. 附上佐證來源\n\n"
+                        "回覆用繁體中文。"
+                    ),
+                }],
+            })
+
+            deeper_text = ""
+            for block in deeper_response.content:
+                if hasattr(block, "type") and block.type == "text":
+                    deeper_text += block.text
+
+            deeper_stats = {
+                "confirmed": deeper_text.count("✅"),
+                "uncertain": deeper_text.count("⚠️"),
+                "wrong": deeper_text.count("❌"),
+            }
+            deeper_report = (
+                f"🔍 深度查核結果\n"
+                f"額外查核：✅{deeper_stats['confirmed']} ⚠️{deeper_stats['uncertain']} ❌{deeper_stats['wrong']}\n\n"
+                f"{deeper_text}"
+            )
+            if len(deeper_report) <= 5000:
+                push_message(user_id, [TextMessage(text=deeper_report)])
+            else:
+                chunks = [deeper_report[i:i + 4900] for i in range(0, len(deeper_report), 4900)]
+                for chunk in chunks[:5]:
+                    push_message(user_id, [TextMessage(text=chunk)])
+
+    except Exception as e:
+        logger.error(f"Fact check failed: {e}")
+        push_message(user_id, [TextMessage(text=f"事實查核失敗：{str(e)}")])
 
 
 # --- Schedule parsing functions ---
@@ -294,10 +569,10 @@ def parse_schedule(text):
     """從文字中解析行程/會議資訊，回傳結構化 JSON。"""
     if not claude_client:
         return None, "ANTHROPIC_API_KEY 未設定。"
-    response = claude_client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=2000,
-        system=(
+    response = claude_api_call({
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 2000,
+        "system": (
             "你是行程解析專家。從用戶提供的文字中提取會議/行程資訊。\n"
             "回傳 JSON 格式，包含以下欄位：\n"
             '{"events": [{"title": "會議標題", "date": "YYYY-MM-DD", '
@@ -312,8 +587,8 @@ def parse_schedule(text):
             "- 如果文字中沒有任何行程/會議資訊，回傳 {\"events\": []}\n"
             "只回傳 JSON，不要加任何說明。"
         ),
-        messages=[{"role": "user", "content": text}],
-    )
+        "messages": [{"role": "user", "content": text}],
+    })
     raw = response.content[0].text
     logger.info(f"Schedule parse raw response: {raw[:500]}")
     # Claude 有時會用 markdown code block 包裝 JSON
@@ -423,8 +698,8 @@ def _all_action_items():
         ),
         QuickReplyItem(
             action=PostbackAction(
-                label="📝 報告審稿", data=json.dumps({"action": "proofread"}),
-                display_text="報告審稿",
+                label="🔍 事實查核", data=json.dumps({"action": "proofread"}),
+                display_text="事實查核",
             )
         ),
         QuickReplyItem(
@@ -551,7 +826,7 @@ def handle_image_message(event):
         TYPE_CONFIG = {
             "schedule": ("📅 行程解析", "schedule"),
             "wine_label": ("🍷 酒標辨識", "wine"),
-            "report": ("📝 報告審稿", "proofread"),
+            "report": ("🔍 事實查核", "proofread"),
         }
 
         if content_type in TYPE_CONFIG:
@@ -583,9 +858,14 @@ def handle_image_message(event):
             )
         ])
 
+    except anthropic.RateLimitError:
+        reply_message(event, [TextMessage(text=RATE_LIMIT_MSG)])
     except Exception as e:
         logger.error(f"Image processing failed: {e}")
-        reply_message(event, [TextMessage(text=f"圖片處理失敗：{str(e)}")])
+        if "rate_limit" in str(e).lower():
+            reply_message(event, [TextMessage(text=RATE_LIMIT_MSG)])
+        else:
+            reply_message(event, [TextMessage(text=f"圖片處理失敗：{str(e)}")])
 
 
 # --- Postback handler ---
@@ -620,12 +900,15 @@ def handle_postback(event):
             reply_message(event, [TextMessage(text=chunk) for chunk in chunks[:5]])
 
     elif action == "proofread":
-        try:
-            result = proofread_text(ocr_text)
-            reply_message(event, [TextMessage(text=f"📝 審稿結果：\n\n{result}")])
-        except Exception as e:
-            logger.error(f"Proofread failed: {e}")
-            reply_message(event, [TextMessage(text=f"審稿失敗：{str(e)}")])
+        # 事實查核：立即回覆 → 背景上網求證 → push 結果
+        reply_message(event, [TextMessage(
+            text="🔎 收到，正在進行事實查核...\n大約需要 1-2 分鐘，完成後會主動通知你。"
+        )])
+        threading.Thread(
+            target=_run_fact_check,
+            args=(user_id, ocr_text),
+            daemon=True,
+        ).start()
 
     elif action == "schedule":
         try:
@@ -666,8 +949,19 @@ def handle_postback(event):
                  f"📄 目前提取的文字：\n{ocr_text[:2000]}"
         )])
 
+    elif action == "text_chat":
+        # 長文字 → 用戶選擇聊天
+        try:
+            reply = chat_with_claude(user_id, ocr_text)
+            if len(reply) > 5000:
+                reply = reply[:4997] + "..."
+            reply_message(event, [TextMessage(text=reply)])
+        except Exception as e:
+            logger.error(f"Chat failed: {e}")
+            reply_message(event, [TextMessage(text=f"回覆失敗：{str(e)}")])
+
     else:
-        reply_message(event, [TextMessage(text="未知操作，請重新傳送圖片。")])
+        reply_message(event, [TextMessage(text="未知操作，請重新傳送。")])
 
 
 @handler.add(MessageEvent, message=TextMessageContent)
@@ -696,14 +990,46 @@ def handle_text_message(event):
                     summary += f"\n💻 本機：{os.path.join(host_ics_dir, filename)}"
                 reply_message(event, [TextMessage(text=summary)])
                 return
-        # 一般對話
+        # 長文字 → 先問用戶：事實查核 or 聊天
+        if len(user_text) > 200:
+            session_set(user_id, user_text, "", content_type="long_text")
+            preview = user_text[:150] + "..." if len(user_text) > 150 else user_text
+            reply_message(event, [
+                TextMessage(
+                    text=f"📄 收到一段文字（{len(user_text)} 字）：\n\n{preview}\n\n請問你想：",
+                    quick_reply=QuickReply(items=[
+                        QuickReplyItem(
+                            action=PostbackAction(
+                                label="🔍 事實查核",
+                                data=json.dumps({"action": "proofread"}),
+                                display_text="事實查核",
+                            )
+                        ),
+                        QuickReplyItem(
+                            action=PostbackAction(
+                                label="💬 聊聊內容",
+                                data=json.dumps({"action": "text_chat"}),
+                                display_text="聊聊內容",
+                            )
+                        ),
+                    ]),
+                )
+            ])
+            return
+
+        # 一般對話（短文字）
         reply = chat_with_claude(user_id, user_text)
         if len(reply) > 5000:
             reply = reply[:4997] + "..."
         reply_message(event, [TextMessage(text=reply)])
+    except anthropic.RateLimitError:
+        reply_message(event, [TextMessage(text=RATE_LIMIT_MSG)])
     except Exception as e:
         logger.error(f"Chat failed: {e}")
-        reply_message(event, [TextMessage(text=f"回覆失敗：{str(e)}")])
+        if "rate_limit" in str(e).lower():
+            reply_message(event, [TextMessage(text=RATE_LIMIT_MSG)])
+        else:
+            reply_message(event, [TextMessage(text=f"回覆失敗：{str(e)}")])
 
 
 @handler.add(MessageEvent)
