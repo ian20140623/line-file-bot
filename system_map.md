@@ -1,5 +1,5 @@
 # LINE File Bot 開發記錄 — 功能說明
-*last updated: 2026-03-12*
+*last updated: 2026-03-13*
 
 > **給未來 AI 的說明**
 > 共用指引見 [`../shared/LOG_GUIDE.md`](../shared/LOG_GUIDE.md)
@@ -17,7 +17,7 @@
 ---
 
 ## 技術架構
-*last updated: 2026-03-12*
+*last updated: 2026-03-13*
 
 | 元件 | 角色 |
 |------|------|
@@ -26,7 +26,8 @@
 | Gunicorn 23.0.0 | Production WSGI Server |
 | line-bot-sdk 3.22.0 | LINE Messaging API SDK |
 | anthropic (Python SDK) | Claude Sonnet 4（OCR/審稿）、Opus 4.6（對話） |
-| Render | 部署平台（免費方案） |
+| Docker + Docker Compose | 容器化部署（本機桌機） |
+| ngrok 3.37.2 | HTTPS 隧道，暴露本機 port 給 LINE Webhook |
 
 ---
 
@@ -92,9 +93,11 @@
 - **為什麼加時間戳**：同名檔案不會互相覆蓋
 - **為什麼清理字元**：LINE 傳來的檔名可能含特殊字元，避免檔案系統問題
 
-### 部署平台：Render
-- **為什麼選 Render**：免費方案、自動 HTTPS（LINE Webhook 要求）、GitHub 自動部署
-- **限制**：15 分鐘無流量休眠、暫存性儲存
+### 部署平台：本機 Docker + ngrok（原 Render）
+- **為什麼搬離 Render**：免費方案 15 分鐘休眠 + 喚醒 30-50 秒，與 LINE reply token 30 秒過期衝突
+- **為什麼用 Docker**：可移植性（未來搬 Mac）、環境隔離、一鍵啟動
+- **為什麼用 ngrok**：提供 HTTPS 公開網址給 LINE Webhook
+- **限制**：ngrok 免費版每次重啟換網址，需手動更新 LINE Webhook URL
 
 ---
 
@@ -112,27 +115,31 @@
 ---
 
 ## 已知限制
-*last updated: 2026-02-24*
+*last updated: 2026-03-13*
 
 | 限制 | 說明 | 緩解方式 |
 |------|------|----------|
-| Render 免費方案休眠 | 15 分鐘無流量自動休眠，喚醒需約 30 秒 | Health check endpoint + 外部 uptime monitoring |
-| 暫存性儲存 | Render 重啟後檔案消失 | 未來可改接雲端儲存（Google Drive、S3） |
+| ngrok 網址不固定 | 免費版每次重啟換網址 | 手動更新 LINE Webhook URL；未來考慮 Cloudflare Tunnel |
 | LINE 檔案過期 | LINE 伺服器上的檔案有時效限制 | Webhook 即時下載，不做延遲處理 |
 | 僅支援文件+圖片+文字 | 影片、音訊不處理 | 設計選擇：文件下載 + 圖片 AI 分析 + 文字對話 |
 
 ---
 
 ## 專案結構
-*last updated: 2026-02-24*
+*last updated: 2026-03-13*
 
 ```
 line-file-bot/
-├── app.py                 # Flask 主程式（Webhook、檔案處理）
-├── requirements.txt       # Python 依賴（Flask、line-bot-sdk、Gunicorn）
-├── README.md              # 設定與部署說明（中文）
+├── app.py                 # Flask 主程式（Webhook、檔案處理、AI 對話）
+├── requirements.txt       # Python 依賴（Flask、line-bot-sdk、Gunicorn、anthropic）
+├── Dockerfile             # Docker 映像定義（Python 3.12-slim + Gunicorn）
+├── docker-compose.yml     # Docker Compose 設定（port、env、volume）
+├── .dockerignore          # Docker build 排除清單
 ├── .env.example           # 環境變數範本
+├── .env                   # 環境變數（不進 git）
+├── README.md              # 設定與部署說明（中文）
 ├── .python-version        # Python 版本（3.12.6）
+├── ROADMAP.md             # 開發路線圖
 ├── log_chronological.md   # 開發記錄 — 流水帳
 └── system_map.md          # 現況快照 — 功能說明
 ```
@@ -140,16 +147,17 @@ line-file-bot/
 ---
 
 ## 開發環境
-*last updated: 2026-02-24*
+*last updated: 2026-03-13*
 
-- **專案位置**：`C:\Users\Ian\OneDrive\ClaudeProjects\line-file-bot\`
+- **專案位置**：`C:\Users\User\OneDrive\ClaudeProjects\line-file-bot\`
 - **Git remote**：origin/main（GitHub）
-- **.gitignore**：應排除 `.env`（含 API Token）、`.claude/`
+- **部署**：本機 Docker（DESKTOP-82QANNF）+ ngrok HTTPS 隧道
+- **.gitignore**：排除 `.env`、`.claude/`、`__pycache__/`、`downloaded_files/`
 
 ---
 
 ## 待辦事項
-*last updated: 2026-02-24*
+*last updated: 2026-03-13*
 
 - [x] 基本檔案下載功能
 - [x] Python 3.12 相容性修復（line-bot-sdk 升級）
@@ -158,5 +166,7 @@ line-file-bot/
 - [x] 圖片分流處理（OCR + Quick Reply 選單）
 - [x] OpenAI → Anthropic 遷移
 - [x] 文字對話功能（Claude Opus 4.6 + 記憶）
-- [ ] 接入持久化儲存（Google Drive / S3）
+- [x] 本機部署（Docker + ngrok）
+- [ ] Obsidian vault 查詢（搜尋 + Claude 分析）
+- [ ] PDF 生成 + LINE 傳檔
 - [ ] 加入錯誤通知機制

@@ -1,6 +1,6 @@
 # ROADMAP — line-file-bot
 
-*last updated: 2026-03-12*
+*last updated: 2026-03-13*
 
 ## ✅ Phase A：圖片 + AI 基礎（最小起步）
 - [x] A1. 加 ImageMessage handler — 接收圖片
@@ -45,12 +45,25 @@
 - [ ] 手動關聯：超出時間窗口的檔案可手動指定
 - [ ] 合併處理：交叉整合產出完整紀錄
 
+Obsidian資料庫操作
+    先有讀 寫 輸出檔案 沒有刪
+    可以說 整理xxx的資訊 如台積電個股報告 美伊戰爭等
+    收到訊息要回覆說處理中
+        一直沒好要說一聲
+    好了以後
+        文字訊息版傳在Line裡
+        完整md版直接傳到Obsidian
+
+語音處理
+    用whisper api
+        轉為文字輸出回傳
+
 ## Phase C：互動強化
 - [ ] C1. LINE Quick Reply / Flex Message 選單
 - [ ] C2. 錯誤通知機制
 
 ## Phase D：基礎設施
-- [ ] D1. 從 Render 搬到本機/桌機（ngrok / Cloudflare Tunnel 解決 webhook）
+- [x] D1. 從 Render 搬到本機/桌機（Docker + ngrok） ✅ 2026-03-13
 - [ ] D2. 持久化儲存（Google Drive / S3）
 
 ---

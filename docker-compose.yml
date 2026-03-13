@@ -1,0 +1,10 @@
+services:
+  bot:
+    build: .
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    volumes:
+      - ./downloaded_files:/app/downloaded_files
+    restart: unless-stopped

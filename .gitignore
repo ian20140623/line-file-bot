@@ -1,1 +1,6 @@
 scripts/scratch/
+.env
+.claude/
+__pycache__/
+*.pyc
+downloaded_files/

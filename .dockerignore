@@ -1,0 +1,8 @@
+.git
+.env
+.claude
+__pycache__
+*.pyc
+downloaded_files
+scripts
+*.md

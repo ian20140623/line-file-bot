@@ -115,8 +115,41 @@
 
 ---
 
+## 2026-03-13（週四）
+
+### 22:34 [DESKTOP] D1 完成：Render → 本機部署（Docker + ngrok）
+
+#### 背景
+- Render 免費方案 15 分鐘無流量休眠，喚醒需 30-50 秒
+- LINE reply token 30 秒過期，與 Render 喚醒時間衝突 → bot 經常無回應
+- Render 現在要求綁信用卡，即使免費方案
+
+#### 本機部署
+- 建立 `Dockerfile`：Python 3.12-slim + Gunicorn，單 worker
+- 建立 `docker-compose.yml`：port 5000、env_file、downloaded_files volume mount
+- 建立 `.dockerignore`：排除 .git、.env、.claude、markdown 等
+- ngrok 3.37.2：建立 HTTPS 隧道，LINE Webhook URL 指向本機
+- 測試通過：文字對話、圖片 OCR 皆正常
+
+#### 其他變更
+- `.env.example` 加入 `ANTHROPIC_API_KEY`
+- `.gitignore` 加入 `.env`、`__pycache__/`、`*.pyc`、`downloaded_files/`
+
+#### 架構討論（未實作，記錄想法）
+- **Obsidian vault 查詢**：bot 跑在本機可直接讀取 vault，用 Claude 分析報告內容
+  - 意圖分流：Claude 判斷「查報告」vs「一般聊天」
+  - 搜尋策略：glob + grep 找相關 markdown，塞進 Claude context 分析
+  - 權限控制：只寫讀/寫函數，不給刪除，路徑鎖定 vault 目錄
+- **PDF 生成 + LINE 傳檔**：分析結果可生成 PDF 回傳 LINE
+- **bot 本質**：類似 OpenClaw 的本機 AI agent，但用 LINE 當介面、權限完全由程式碼控制
+
+#### 注意
+- ngrok 免費版每次重啟換網址，需重新更新 LINE Webhook URL
+- 未來可考慮 Cloudflare Tunnel（免費固定域名）或 ngrok 付費方案
+
+---
+
 ## 待解決
 
-- **Render 免費方案限制** — 15 分鐘無流量會休眠，喚醒需約 30 秒
-- **暫存性儲存** — Render 重啟後下載的檔案會消失
+- **ngrok 網址不固定** — 免費版每次重啟換網址，需手動更新 LINE Webhook URL
 - **LINE 檔案過期** — LINE 伺服器上的檔案有時效限制，需即時下載
