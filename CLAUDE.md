@@ -22,6 +22,13 @@
 以上檔案不存在就跳過，不要報錯。
 每個步驟都要向用戶顯示目前正在做什麼（例如「正在讀取 system_map.md...」）。
 
+## Scratch 規則
+- 所有含處理邏輯的腳本存入 `scripts/scratch/`，不允許 inline execution 或 temp file
+- 命名：`YYYYMMDD_HHMM_機台_核心動作_狀態.py`（機台：NB/DT，狀態：ok/failed/wip）
+- 不進 git（靠 OneDrive 同步）
+- 跨專案：腳本放被改的專案，log 兩邊記
+- 詳細規範見 `../shared/ROADMAP.md`「scratch 規範草案」
+
 ## 收工：LCP
 
 見 ../shared/CLAUDE.md（含 ROADMAP 同步規則）
