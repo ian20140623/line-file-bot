@@ -225,6 +225,9 @@
 - 原 B~J 全部順延為 C~K
 - 決策：PDF 留存是架構性變更，獨立為高優先 Phase 而非塞進 Highlight 整合
 
+#### line-file-bot ROADMAP（續）
+- 新增 B4：券商 Memo 處理（文字版）— 個股研究/產業/總經，Quick Reply 四選項（存檔/查核/兩者/自由輸入）
+
 ---
 
 ## 待解決
