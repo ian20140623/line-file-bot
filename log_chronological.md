@@ -230,9 +230,14 @@
 - 新增 Phase B：功能導覽（← 本輪）— 用戶輸入「說明」→ 列出已完成功能
 - 原 B~G 全部順延為 C~H（子項編號同步更新）
 
+### 09:11 [DESKTOP] ROADMAP 整理：停機恢復 + 待解決清理
+
+- 新增 E3：停機恢復（Docker restart always + health check + 重啟通知 + D2 告警）
+- 移除「LINE 檔案過期」待解決項目 — Webhook 本來就即時下載，非實際問題
+- 停機恢復排序：放在 Phase E 基礎設施，優先度低於現有 E1/E2
+
 ---
 
 ## 待解決
 
 - **ngrok 網址不固定** — 免費版每次重啟換網址，需手動更新 LINE Webhook URL
-- **LINE 檔案過期** — LINE 伺服器上的檔案有時效限制，需即時下載

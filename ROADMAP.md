@@ -85,6 +85,11 @@
 ## ✅ Phase E：基礎設施
 - [x] E1. 從 Render 搬到本機/桌機（Docker + ngrok） ✅ 2026-03-13
 - [ ] E2. 持久化儲存（Google Drive / S3）
+- [ ] E3. 停機恢復
+  > LINE Webhook 無法回溯拉取錯過的訊息，但可降低影響
+  - Docker restart policy `always` + health check 自動重啟（已有基礎）
+  - 停機偵測 + 重啟後主動通知用戶「我剛重啟，如有遺漏請重送」
+  - 搭配 D2 錯誤通知：掛掉時即時告警
 
 ## Phase F：Obsidian 資料庫操作
 > Vault 路徑：`C:\Users\User\Documents\Obsidian Vault`
