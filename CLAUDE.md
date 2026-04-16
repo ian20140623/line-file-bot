@@ -3,6 +3,10 @@
 > 專案資訊見 README.md、system_map.md
 > 共用指引與環境規則見 ../shared/CLAUDE.md、../shared/LOG_GUIDE.md ^ck-d33d9c-0
 
+
+## 核心原則
+SRP / Information Hiding / OCP / No Silent Workaround(遇阻停下報告不繞路) / Explicit Intent(做之前先宣告 scope)。詳見 [shared/ARCHITECTURE_PRINCIPLES.md](../shared/ARCHITECTURE_PRINCIPLES.md)。
+
 ## 環境需求
 - Python: 見 .python-version
 - pip 套件：flask, line-bot-sdk, gunicorn（見 requirements.txt）
