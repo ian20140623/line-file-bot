@@ -4,3 +4,6 @@ scripts/scratch/
 __pycache__/
 *.pyc
 downloaded_files/
+
+# WORKTREE_GUIDE Ver 2.0
+.worktree/
