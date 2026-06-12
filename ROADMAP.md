@@ -1,17 +1,17 @@
 # ROADMAP — line-file-bot
 
-*last updated: 2026-03-14*
+*last updated: 2026-03-14* ^ck-81140b-0
 
 ## ✅ Phase A：圖片 + AI 基礎（最小起步）
 - [x] A1. 加 ImageMessage handler — 接收圖片
-- [x] A2. 接 Claude API — 圖片丟多模態模型（Sonnet OCR + Opus 對話）
+- [x] A2. 接 Claude API — 圖片丟多模態模型（Sonnet OCR + Opus 對話） ^ck-a630c2-1
 
 ## Phase B：功能導覽 ← 本輪
 > 功能越來越多，用戶記不住 → 用簡單指令叫出目前已完成的功能清單
 - [ ] B1. 「說明」或「功能」指令 → 回傳已完成功能一覽
   - 依輸入類型分類（圖片可以...、文字可以...、檔案可以...）
   - 動態產生：根據程式碼中實際啟用的 handler 自動列出
-  - 簡潔易懂，非技術用語
+  - 簡潔易懂，非技術用語 ^ck-1265db-2
 
 ## Phase C：分流處理
 - [ ] C1. 圖片智慧分流
@@ -81,17 +81,17 @@
       比方 同一場研討會的錄音、照片、投影片等等
     一個是 一般相片處理
     一個是 一般文件處理
-    一個是 向量資料庫的窗口
+    一個是 向量資料庫的窗口 ^ck-bf4987-3
 
 ### Cross-cutting：多檔案自動關聯（C1/C2/C3 共用）
 - [ ] 時間窗口內（2 小時）多檔案自動判斷是否同一場活動
 - [ ] 手動關聯：超出時間窗口的檔案可手動指定
-- [ ] 合併處理：交叉整合產出完整紀錄
+- [ ] 合併處理：交叉整合產出完整紀錄 ^ck-29c378-4
 
 ## Phase D：互動強化
 - [x] D1. LINE Quick Reply 選單（已用於圖片分流 + 行程解析）
 - [ ] D1b. Flex Message 進階選單
-- [ ] D2. 錯誤通知機制
+- [ ] D2. 錯誤通知機制 ^ck-b6743c-5
 
 ## ✅ Phase E：基礎設施
 - [x] E1. 從 Render 搬到本機/桌機（Docker + ngrok） ✅ 2026-03-13
@@ -100,7 +100,7 @@
   > LINE Webhook 無法回溯拉取錯過的訊息，但可降低影響
   - Docker restart policy `always` + health check 自動重啟（已有基礎）
   - 停機偵測 + 重啟後主動通知用戶「我剛重啟，如有遺漏請重送」
-  - 搭配 D2 錯誤通知：掛掉時即時告警
+  - 搭配 D2 錯誤通知：掛掉時即時告警 ^ck-9b96ac-6
 
 ## Phase F：Obsidian 資料庫操作
 > Vault 路徑：`C:\Users\User\Documents\Obsidian Vault`
@@ -111,19 +111,19 @@
 - [ ] F5. Obsidian 筆記連結
   - 寫入 .md 後回傳純文字摘要（簡版）+ 可點擊連結
   - `/note/<file_id>` HTML 中繼頁（複用 `/cal/` 模式，避免 LINE in-app browser 攔截 `obsidian://`）
-  - Obsidian URI：`obsidian://open?vault=...&file=...`，手機+電腦都能直接開啟
+  - Obsidian URI：`obsidian://open?vault=...&file=...`，手機+電腦都能直接開啟 ^ck-a67a35-7
 
 ## Phase G：多模型 Fallback（Rate Limit 對策）
 > 背景：Anthropic Sonnet 目前 30K input tokens/min，事實查核容易撞限
 - [ ] G1. Gemini API 接入（免費 250K TPM，事實查核優先切換）
 - [ ] G2. Multi-provider fallback：Anthropic 429 → 自動切 Gemini
-- [ ] G3. 評估 Anthropic 升級方案（Build tier $40-100/mo → 80K TPM）
+- [ ] G3. 評估 Anthropic 升級方案（Build tier $40-100/mo → 80K TPM） ^ck-232656-8
 
 ## Phase H：語音處理
 - [ ] H1. Whisper API 語音轉文字
-- [ ] H2. 轉錄結果回傳 LINE
+- [ ] H2. 轉錄結果回傳 LINE ^ck-9e4a2a-9
 
 ---
 
 > 後端處理能力由 [doc-ingestion](../doc-ingestion/ROADMAP.md) 提供（PDF/圖片/文字 → 結構化 Markdown）
-> 券商報告專用流程由 [broker-reports](../broker-reports/) 提供
+> 券商報告專用流程由 [broker-reports](../broker-reports/) 提供 ^ck-e95958-10

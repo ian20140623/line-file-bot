@@ -5,7 +5,7 @@
 > 共用指引見 [`../shared/LOG_GUIDE.md`](../shared/LOG_GUIDE.md)
 >
 > **本專案補充：**
-> - 遠端：origin/main
+> - 遠端：origin/main ^ck-68bdd4-0
 
 ---
 
@@ -15,7 +15,7 @@
 - 圖片/長文字事實查核：自動挑選數字+事實聲明 → web search 上網求證 → 背景執行+推送結果。
 - 文字訊息自動偵測行程 → 解析 + 產 .ics 行事曆檔；長文字（>200 字）→ 問事實查核 or 聊天；短文字 → Claude Opus 4.6 對話。
 - 文字對話：Claude Opus 4.6 帶記憶對話（最近 10 輪，30 分鐘 TTL）。
-- API 容錯：所有 Claude API call 統一走 retry wrapper（429 exponential backoff）。
+- API 容錯：所有 Claude API call 統一走 retry wrapper（429 exponential backoff）。 ^ck-6d7ff2-2
 
 ---
 
@@ -31,27 +31,28 @@
 | anthropic (Python SDK) | Claude Sonnet 4（OCR/事實查核/web search）、Opus 4.6（對話） |
 | Docker + Docker Compose | 容器化部署（本機桌機） |
 | ngrok 3.37.2 | HTTPS 隧道，暴露本機 port 給 LINE Webhook |
+^ck-e9827b-4 ^ck-931c70-4
 
 ---
 
 ## 主要流程
-*last updated: 2026-02-24*
+*last updated: 2026-02-24* ^ck-41df15-6
 
 ### 1. Webhook 接收 (`/callback`)
 - LINE Platform 發送 POST 到 `/callback`
 - 驗證 `X-Line-Signature` 簽名
-- 解析事件，分派到對應 handler
+- 解析事件，分派到對應 handler ^ck-5734a0-7
 
 ### 2. 檔案處理 (`handle_file_message`)
 - 收到檔案訊息時觸發
 - 檢查副檔名是否在支援列表中
 - 呼叫 `save_file()` 下載並儲存
-- 回傳確認訊息（含檔案路徑）
+- 回傳確認訊息（含檔案路徑） ^ck-d6034d-8
 
 ### 3. 檔案儲存 (`save_file`)
 - 用 `MessagingApiBlob.get_message_content()` 從 LINE 伺服器下載
 - 檔名清理特殊字元 + 加時間戳（`name_YYYYmmdd_HHMMSS.ext`）
-- 儲存到 `DOWNLOAD_DIR`（預設 `./downloaded_files`）
+- 儲存到 `DOWNLOAD_DIR`（預設 `./downloaded_files`） ^ck-571bec-9
 
 ### 4. 圖片智慧分流 (`handle_image_message` → `handle_postback`)
 - 收到圖片 → 下載 → `ocr_and_classify()`：Claude Sonnet 單次 API call 做 OCR + 內容分類
@@ -60,31 +61,31 @@
   - 偵測到特定類型 → 2 按鈕（判定選項 + 「其他」）
   - `general` → 4 按鈕全展開（行程解析/酒標辨識/事實查核/文字提取）
 - Postback handler 處理選擇：文字提取、事實查核、行程解析、酒標辨識（placeholder）、show_all、text_chat
-- In-memory session 暫存 OCR 結果 + content_type（TTL 10 分鐘）
+- In-memory session 暫存 OCR 結果 + content_type（TTL 10 分鐘） ^ck-03d525-10
 
 ### 4b. 事實查核（`_run_fact_check`，背景執行）
 - `identify_claims_for_check()`：AI 自動選取最多 10 個數字聲明 + 5 個重要事實
 - `verify_claims_with_search()`：使用 Anthropic `web_search_20250305` 工具上網搜尋求證
 - 結果用 `push_message()` 非同步推送（不受 LINE reply token 30 秒限制）
 - 錯誤率 >20% → 自動觸發深度查核（更多 web search）
-- 長文字（>5000 字）自動分段推送
+- 長文字（>5000 字）自動分段推送 ^ck-05799d-11
 
 ### 5. 文字訊息處理 (`handle_text_message`)
 - 收到文字 → `classify_text()` 判斷是否為行程（Claude Sonnet，max_tokens=10）
 - **行程** → `parse_schedule()` 解析 JSON → `generate_ics()` 產 .ics → 回傳摘要 + 下載連結
 - **長文字（>200 字元）** → Quick Reply 問「事實查核 or 聊聊內容」
 - **短文字非行程** → 帶歷史記錄送 Claude Opus 4.6 對話
-- 每用戶最近 10 輪對話記憶，30 分鐘 TTL
+- 每用戶最近 10 輪對話記憶，30 分鐘 TTL ^ck-1ef3d4-12
 
 ### 6. 行程解析 + .ics 生成
 - `parse_schedule()`：Claude Sonnet 從文字/OCR 結果提取行程 JSON
 - `generate_ics()`：JSON → .ics 檔（含 VTIMEZONE Asia/Taipei、METHOD:PUBLISH、建立時間戳在 DESCRIPTION）
 - `/ics/<filename>` route：強制下載 .ics（Content-Type: application/octet-stream）
 - `/cal/<file_id>` route：HTML 中繼頁，綠色下載按鈕，避免 LINE in-app browser 攔截 .ics URL
-- 檔案存放於 `generated_ics/` 目錄
+- 檔案存放於 `generated_ics/` 目錄 ^ck-7e0910-13
 
 ### 7. 健康檢查 (`/`)
-- GET 請求回傳 "OK"
+- GET 請求回傳 "OK" ^ck-e6182e-14
 
 ---
 
@@ -98,25 +99,26 @@
 | 簡報 | `.ppt`, `.pptx`, `.odp` |
 | 其他 | `.odt` |
 | 壓縮檔 | `.zip`, `.rar`, `.7z` |
+^ck-9ad4d0-16 ^ck-d9325b-16
 
 ---
 
 ## 關鍵設計決策
-*last updated: 2026-02-24*
+*last updated: 2026-02-24* ^ck-6346ab-18
 
 ### SDK 版本：line-bot-sdk 3.22.0
 - **為什麼不用 3.14.0**：Python 3.12 的 PEP 585 generics 導致語法錯誤
-- **現行做法**：升級到 3.22.0，支援 Python 3.10–3.14
+- **現行做法**：升級到 3.22.0，支援 Python 3.10–3.14 ^ck-2ef3df-19
 
 ### 檔名處理：時間戳 + 字元清理
 - **為什麼加時間戳**：同名檔案不會互相覆蓋
-- **為什麼清理字元**：LINE 傳來的檔名可能含特殊字元，避免檔案系統問題
+- **為什麼清理字元**：LINE 傳來的檔名可能含特殊字元，避免檔案系統問題 ^ck-05e69d-20
 
 ### 部署平台：本機 Docker + ngrok（原 Render）
 - **為什麼搬離 Render**：免費方案 15 分鐘休眠 + 喚醒 30-50 秒，與 LINE reply token 30 秒過期衝突
 - **為什麼用 Docker**：可移植性（未來搬 Mac）、環境隔離、一鍵啟動
 - **為什麼用 ngrok**：提供 HTTPS 公開網址給 LINE Webhook
-- **限制**：ngrok 免費版每次重啟換網址，需手動更新 LINE Webhook URL
+- **限制**：ngrok 免費版每次重啟換網址，需手動更新 LINE Webhook URL ^ck-349598-21
 
 ---
 
@@ -132,6 +134,7 @@
 | `PORT` | 伺服器埠號（預設 5000） |
 | `BASE_URL` | 公開 URL（ngrok），用於產生 .ics 下載連結 |
 | `HOST_ICS_DIR` | 本機 .ics 檔案存放路徑 |
+^ck-55a516-23 ^ck-b22830-23
 
 ---
 
@@ -146,6 +149,7 @@
 | 文字分類額外 API call | 每則文字訊息多一次 Sonnet call（~0.5s） | 未來可改關鍵字預篩 |
 | Anthropic Rate Limit | Sonnet 30K input tokens/min，事實查核容易撞限 | claude_api_call() retry wrapper + 未來 Gemini fallback |
 | In-memory session | 重啟歸零 | 單 worker 夠用，可接受 |
+^ck-f7cd1c-25 ^ck-19ec23-25
 
 ---
 
@@ -168,7 +172,7 @@ line-file-bot/
 ├── system_map.md          # 現況快照 — 功能說明
 ├── generated_ics/         # .ics 行事曆檔輸出目錄（不進 git）
 └── downloaded_files/      # 下載檔案目錄（不進 git）
-```
+``` ^ck-a3b473-27
 
 ---
 
@@ -178,7 +182,7 @@ line-file-bot/
 - **專案位置**：`C:\Users\User\OneDrive\ClaudeProjects\line-file-bot\`
 - **Git remote**：origin/main（GitHub）
 - **部署**：本機 Docker（DESKTOP-82QANNF）+ ngrok HTTPS 隧道
-- **.gitignore**：排除 `.env`、`.claude/`、`__pycache__/`、`downloaded_files/`
+- **.gitignore**：排除 `.env`、`.claude/`、`__pycache__/`、`downloaded_files/` ^ck-a34c22-29
 
 ---
 
@@ -199,4 +203,4 @@ line-file-bot/
 - [ ] 多模型 Fallback（Gemini 接入，Rate Limit 對策）
 - [ ] Obsidian vault 查詢（搜尋 + Claude 分析）
 - [ ] PDF 智慧分流
-- [ ] 加入錯誤通知機制
+- [ ] 加入錯誤通知機制 ^ck-7cb51a-31
