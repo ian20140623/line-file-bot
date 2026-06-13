@@ -261,6 +261,18 @@
 
 ---
 
+## 2026-06-13（週六）
+
+### 18:47 [Mac mini] 建 cross_todo `## line-file-bot` section + 發現 `/ics` path traversal 漏洞
+
+- **起因**：open-session 時回報「cross_todo 無 line-file-bot 項目」，Sir 質疑——複查發現本專案長期無專屬 section，但散在 command-center / life-os / infra / shared 共 7 處被點名（多數 6/13 ADR-013 才拍板要動到本 repo code）。
+- **decided**：在 `~/Projects/hub/cross_todo.md` 建 `## line-file-bot` section，owned 工項列全文、他 section owned 的只留 `^ck` 指標（不複製內文、避免 stale-list drift）。
+- **安全發現（本 repo 自有 code）**：查證 ADR-013 點名的「`/ics`+`/cal` path traversal」屬實 — `serve_ics()`（`app.py:722-734`）把 URL 來的 `filename` 直接 `os.path.join(ICS_DIR, filename)` 後 `open()` 回傳，**無 `..`/絕對路徑收斂**，`os.path.isfile` 只擋不存在、擋不了逃逸 → 任意檔讀 primitive（可撈 `.env`，且 `/ics` 不在 webhook 後、不需驗章）。`/cal/<file_id>`（`:737-743`）因強制接 `.ics` 後綴讀取面較窄。修法：`os.path.realpath` 收斂進 `ICS_DIR` 才放行。已落 cross_todo `^ck-260613-linefilebot-path-traversal`（owned、可即刻 ship、與部署位置無關）。
+- **對齊缺口**：本 repo ROADMAP（停在 Phase B/C，`last updated 2026-03-14`）沒記到 ADR-013 要把本 repo 成果層抽成共用 `line_adapter`（家在 life-os），已記入 cross_todo 待動工前補。
+- 本 session 未改 line-file-bot code。 ^ck-260613-linefilebot-crosstodo
+
+---
+
 ## 待解決
 
 - **ngrok 網址不固定** — 免費版每次重啟換網址，需手動更新 LINE Webhook URL ^ck-b9bb7f-60
